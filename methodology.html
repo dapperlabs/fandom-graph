@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How this works · Top Shot Fandom Graph</title>
+<meta name="description" content="How the Fandom Graph is built — the Top Shot public GraphQL API, what every node and edge represents, and what the numbers mean." />
+<meta property="og:title" content="Top Shot · Fandom Graph · How this works" />
+<meta property="og:description" content="Every node is a real Moment. Every edge is a real wallet that owns one. Live data from the public NBA Top Shot API." />
+<meta property="og:image" content="https://fandom-v3.vercel.app/og-default.png" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:image" content="https://fandom-v3.vercel.app/og-default.png" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23ff2d4e'/%3E%3Ctext x='16' y='22' font-family='Arial Black' font-size='18' font-weight='900' text-anchor='middle' fill='white'%3ETS%3C/text%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+<style>
+  body { background: #05060c; color: #f0f2fd; font-family: 'Sofia Sans', system-ui, sans-serif; min-height: 100vh; }
+  main { max-width: 720px; margin: 0 auto; padding: 64px 24px 96px; }
+  h1 { font-family: 'Sofia Sans Extra Condensed', system-ui, sans-serif; font-weight: 900; font-size: clamp(40px, 6vw, 72px); line-height: 0.95; letter-spacing: -0.01em; margin: 0 0 16px; }
+  h1 .accent { background: linear-gradient(90deg, #5b6fff, #14d8c4, #f5b840); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  h2 { font-family: 'Sofia Sans Extra Condensed', system-ui, sans-serif; font-weight: 800; font-size: 24px; text-transform: uppercase; letter-spacing: 0.04em; margin: 48px 0 14px; color: #14d8c4; }
+  p { font-size: 16px; line-height: 1.65; color: rgba(240,242,253,0.85); margin: 0 0 14px; }
+  p strong { color: #f5b840; font-weight: 700; }
+  code { font-family: 'JetBrains Mono', SF Mono, monospace; font-size: 13px; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px; color: #14d8c4; }
+  ul { padding-left: 20px; margin: 0 0 16px; color: rgba(240,242,253,0.85); }
+  ul li { margin-bottom: 8px; line-height: 1.55; }
+  .lede { font-size: 19px; line-height: 1.55; color: rgba(240,242,253,0.92); margin: 24px 0 32px; }
+  .back-link { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 999px; color: #f0f2fd; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; text-decoration: none; transition: all 0.15s ease; margin-top: 48px; }
+  .back-link:hover { border-color: #14d8c4; color: #14d8c4; transform: translateX(-2px); }
+  .nav-mini { display: flex; align-items: center; justify-content: space-between; padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 0; }
+  .nav-mini a { color: rgba(240,242,253,0.55); text-decoration: none; font-size: 13px; font-weight: 600; }
+  .nav-mini a:hover { color: #14d8c4; }
+  .nav-mini .logo { color: #f0f2fd; font-weight: 800; }
+</style>
+</head>
+<body>
+
+<nav class="nav-mini">
+  <a href="/" class="logo">TS · Top Shot Fandom Graph</a>
+  <a href="/">← Back to graph</a>
+</nav>
+
+<main>
+
+<h1>How <span class="accent">this works</span>.</h1>
+
+<p class="lede">Every node in the graph is a real, on-chain NBA Top Shot Moment. Every edge connects a real Flow wallet to a Moment it actually owns. The numbers update with the platform — there is no mock data.</p>
+
+<h2>What you're looking at</h2>
+<p>You pick one of the six athletes. The site loads that athlete's full universe — every play that's ever been minted, every edition, every collector. The graph then renders three rings:</p>
+<ul>
+  <li><strong>Center.</strong> The athlete.</li>
+  <li><strong>Inner orbit.</strong> Every <em>edition</em> minted for that athlete — color-coded by tier (Common, Rare, Fandom, Legendary, Ultimate). An edition is one specific play (e.g. LeBron's Cosmic dunk over Bridges, March 2024) at one tier — Top Shot mints them in fixed circulation counts ranging from 17 to 60,000.</li>
+  <li><strong>Outer orbit.</strong> Every Flow wallet that holds at least one Moment of this athlete. The bigger the avatar, the more they hold. The brightest ring is the top 10 — Top Shot's most-invested fans of this player.</li>
+</ul>
+
+<h2>Where the numbers come from</h2>
+<p>The site reads the public Top Shot GraphQL API at <code>public-api.nbatopshot.com/graphql</code>. No login is required. We use three queries:</p>
+<ul>
+  <li><code>searchPlays(byPlayers:[id])</code> — every play associated with the athlete (LeBron has 80, Curry has more)</li>
+  <li><code>searchEditions(byPlayIDs)</code> — every minted edition of those plays, with its <code>circulationCount</code> (the canonical "how many of these exist" number)</li>
+  <li><code>searchMintedMoments(byEditions)</code> — every individual minted serial, paginated to exhaustion (no caps), with the current owner's wallet</li>
+</ul>
+<p>The big number you see — "<strong>288,890 Moments</strong>" for LeBron — is the sum of <code>circulationCount</code> across every edition. That's the authoritative supply, not an extrapolation.</p>
+
+<h2>What "Edition" means</h2>
+<p>A play is the highlight (LeBron's dunk on Friday). An edition is one specific minted version of that play at one specific tier. The same play often gets multiple editions — a Common version with 12,000 in circulation, a Rare with 999, a Legendary with 99. Each edition is its own collectible.</p>
+
+<h2>The spotlight feature</h2>
+<p>Click any collector node and the graph dims everything else. Now you see only that collector's Moments — what they own, what they don't. The badge at the top shows their completion: <strong>"holds 45 of 57 editions · 78.9%"</strong>. Press <code>ESC</code> or click the badge to clear.</p>
+
+<h2>What's filtered</h2>
+<p>The Top Shot pack-distribution wallet (<code>b6f2481eba4df97b</code>) holds tens of thousands of Moments waiting to be sold to collectors. It's not a fan, it's a system account, so it's excluded from every graph and every leaderboard. Same for any other unnamed wallet holding more than 1,500 Moments of a single player — those are exchanges and treasuries, not collectors.</p>
+
+<h2>How fresh the data is</h2>
+<p>The data is regenerated periodically — typically within hours of any new mint. If you spot your wallet in here and your holdings are slightly off, the lag is usually a recent acquisition or sale. The numbers you see here today were ingested by the public API.</p>
+
+<h2>What this isn't</h2>
+<ul>
+  <li>It isn't a marketplace. You can't buy or sell Moments here. Click <a href="https://nbatopshot.com" target="_blank" rel="noopener">Open Top Shot</a> for that.</li>
+  <li>It isn't financial advice. Estimated USD values are based on tier averages, not live order books.</li>
+  <li>It isn't comprehensive. Six athletes today. The full top 30+ is the next milestone.</li>
+</ul>
+
+<a href="/" class="back-link"><span style="font-size: 16px; line-height: 1;">←</span> Back to the graph</a>
+
+</main>
+
+</body>
+</html>
