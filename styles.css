@@ -3693,3 +3693,26 @@ footer .footer-inner code { font-family: var(--mono); color: var(--fg-muted); }
   .cert-specimen-table td.f-verifier { width: auto; min-width: 0; }
   .footer-see-also { padding: 0 16px; }
 }
+/* spec-003 Task 6 — honest top-N rendering coverage disclosure */
+.graph-coverage {
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 8px 16px;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  .graph-coverage { font-size: 10px; padding: 6px 12px; bottom: 56px; }
+}

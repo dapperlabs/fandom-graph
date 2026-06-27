@@ -663,7 +663,6 @@
 
     // Edition nodes — pinned on a deterministic inner ring, sized by market value
     const editionNodes = new Map();
-    const MAX_PER_EDITION_IN_GRAPH = 100;
     const editionCount = p.editions.length;
     const EDITION_RADIUS = 105;
 
@@ -707,94 +706,101 @@
       });
     });
 
-    // Build owner nodes from sampled serials
-    const ownerNodes = new Map();
-    function ensureOwner(owner) {
-      const k = ownerKey(owner);
-      if (!k) return null;
-      if (!ownerNodes.has(k)) {
-        const cross = crossPlayerCount(owner);
-        const master = ownerMasterData.get(k) || owner;
-        ownerNodes.set(k, {
-          id: 'collector:' + k,
-          type: 'collector',
-          name: ownerLabel(owner),
-          flowAddress: owner.flowAddress,
-          username: owner.username,
-          dapperID: owner.dapperID,
-          profileImageUrl: owner.profileImageUrl || master.profileImageUrl,
-          topshotScore: owner.topshotScore,
-          crossPlayerFan: cross > 1,
-          crossPlayerCount: cross,
-          holdings: 0,
-          momentsOwned: []
-        });
-      }
-      return ownerNodes.get(k);
-    }
+    // ---- Honest top-N rendering (spec-003 Task 6) ----
+    // The graph no longer reconstructs owners from the first 100 sampled serials
+    // of each edition (that was silent sampling — only owners who happened to
+    // appear in serialsSampled[0..100] surfaced). Instead we consume the full
+    // owners[] array, which SPEC-002 guarantees is ranked by holdings DESC and
+    // capped at the top-1000. The top 200 become full interactive collector
+    // nodes; 201-1000 are rendered as a faint THREE.Points hint annulus so the
+    // user can see the universe continues beyond the rendered set.
+    const FULL_NODE_LIMIT = 200;
 
-    for (const e of p.editions) {
-      const sample = e.serialsSampled.slice(0, MAX_PER_EDITION_IN_GRAPH);
-      for (const s of sample) {
-        if (!s.ownerFlowAddress) continue;
-        const ownerData = p.owners.find(o => o.flowAddress === s.ownerFlowAddress);
-        if (!ownerData) continue;
-        const n = ensureOwner(ownerData);
-        if (!n) continue;
-        n.holdings += 1;
-        n.momentsOwned.push({ editionKey: e.editionKey, serial: s.serial, flowId: s.flowId, edition: e });
-        links.push({
-          source: n.id, target: 'moment:' + e.editionKey,
-          kind: 'collector-moment',
-          serial: s.serial,
-          value: 0.6
-        });
-      }
-    }
-
-    // Compute estimated value held per collector: extrapolate sampled tier-mix up to full holdings.
-    const playerTotalValue = editionValues.reduce((a, v) => a + v, 0);
-    const playerTotalMinted = p.editions.reduce((a, e) => a + (e.edition?.circulationCount || 0), 0);
-    const playerAvgUnit = playerTotalValue / Math.max(1, playerTotalMinted);
-
-    // Filter out pack/minter/system accounts. These hold thousands of moments before
-    // distribution and dwarf real collectors. Heuristic: known denylist + outlier holdings
-    // (>1500 in a single player AND no username = system wallet, not a fan).
+    // Filter out pack/minter/system accounts first. These hold thousands of
+    // moments before distribution and dwarf real collectors. Heuristic: known
+    // denylist + outlier holdings (>1500 in a single player AND no username =
+    // system wallet, not a fan). Filtering happens before the top-200 cap so a
+    // system wallet can never steal a rendered slot.
     const SYSTEM_ADDRESSES = new Set([
       'b6f2481eba4df97b',  // Top Shot pack distribution wallet (verified across all 6 players)
       '0xb6f2481eba4df97b' // (with 0x prefix variant just in case)
     ]);
-    function isSystemAccount(o, holdings) {
+    function isSystemAccount(o) {
       if (!o || !o.flowAddress) return false;
       if (SYSTEM_ADDRESSES.has(o.flowAddress) || SYSTEM_ADDRESSES.has(String(o.flowAddress).toLowerCase())) return true;
       // Heuristic fallback: if no username and holds an absurd amount, likely system
       const noUsername = !o.username || o.username === '?' || o.username === '';
-      if (noUsername && holdings > 1500) return true;
+      if (noUsername && o.holdings > 1500) return true;
       return false;
     }
 
-    const ownerArr = Array.from(ownerNodes.values()).filter(o => {
-      const full = p.owners.find(x => x.flowAddress === o.flowAddress);
-      const holdings = full ? full.holdings : o.holdings;
-      return !isSystemAccount(o, holdings);
-    });
-    ownerArr.forEach(o => {
-      const full = p.owners.find(x => x.flowAddress === o.flowAddress);
-      o.fullHoldings = full ? full.holdings : o.holdings;
-      // Sampled value from the moments we saw them own
-      let sampledVal = 0;
-      for (const m of o.momentsOwned) sampledVal += tierUnitValue(m.edition.tier);
-      const sampledCount = o.momentsOwned.length;
-      // Extrapolate to full holdings using their own tier mix; fall back to player average
-      o.valueHeld = sampledCount > 0 && o.fullHoldings > 0
-        ? sampledVal * (o.fullHoldings / sampledCount)
-        : o.fullHoldings * playerAvgUnit;
-    });
-    // Rank by fullHoldings (raw count) — the number must agree with the rank shown.
-    // Tie-break on valueHeld so a tier-mixed collector beats a Common-only collector
-    // at equal count.
-    ownerArr.sort((a, b) => (b.fullHoldings - a.fullHoldings) || (b.valueHeld - a.valueHeld));
-    ownerArr.forEach((o, i) => { o.globalRank = i + 1; });
+    // owners[] is already ranked by holdings DESC (SPEC-002 guarantee). Use that
+    // order directly — no re-sort — so globalRank is the owner's true leaderboard
+    // position in the full dataset, not a sampled approximation.
+    const rankedOwners = p.owners.filter(o => !isSystemAccount(o));
+    rankedOwners.forEach((o, i) => { o.__rank = i + 1; });
+
+    // Estimated value held per collector. We no longer have a per-owner sampled
+    // tier mix (sampling is gone), so valueHeld is the player-average unit value
+    // times the owner's true holdings. This keeps node sizing honest to the real
+    // holdings count; tier mix only affected the now-removed extrapolation.
+    const playerTotalValue = editionValues.reduce((a, v) => a + v, 0);
+    const playerTotalMinted = p.editions.reduce((a, e) => a + (e.edition?.circulationCount || 0), 0);
+    const playerAvgUnit = playerTotalValue / Math.max(1, playerTotalMinted);
+
+    // Cross-reference momentsOwned from serialsSampled where available — purely
+    // for the leaderboard sparkline / detail drawer, NOT for owner discovery.
+    const ownerMoments = new Map(); // flowAddress -> [{editionKey,serial,flowId,edition}]
+    for (const e of p.editions) {
+      for (const s of e.serialsSampled) {
+        if (!s.ownerFlowAddress) continue;
+        if (!ownerMoments.has(s.ownerFlowAddress)) ownerMoments.set(s.ownerFlowAddress, []);
+        ownerMoments.get(s.ownerFlowAddress).push({ editionKey: e.editionKey, serial: s.serial, flowId: s.flowId, edition: e });
+      }
+    }
+
+    // Build full collector nodes for the top FULL_NODE_LIMIT (or fewer if the
+    // player has fewer owners). These get sprites, avatars, labels, click
+    // handlers — the whole existing treatment via the downstream node decorators.
+    const ownerArr = [];
+    for (let i = 0; i < Math.min(FULL_NODE_LIMIT, rankedOwners.length); i++) {
+      const owner = rankedOwners[i];
+      const k = ownerKey(owner);
+      if (!k) continue;
+      const cross = crossPlayerCount(owner);
+      const master = ownerMasterData.get(k) || owner;
+      const momentsOwned = ownerMoments.get(owner.flowAddress) || [];
+      // Collector-moment links only for the moments we actually saw them own in
+      // the sample (cross-reference, not the source of truth for who exists).
+      const node = {
+        id: 'collector:' + k,
+        type: 'collector',
+        name: ownerLabel(owner),
+        flowAddress: owner.flowAddress,
+        username: owner.username,
+        dapperID: owner.dapperID,
+        profileImageUrl: owner.profileImageUrl || master.profileImageUrl,
+        topshotScore: owner.topshotScore,
+        crossPlayerFan: cross > 1,
+        crossPlayerCount: cross,
+        holdings: owner.holdings,         // true count from data, not sampled tally
+        fullHoldings: owner.holdings,
+        globalRank: owner.__rank,
+        momentsOwned,
+        valueHeld: owner.holdings * playerAvgUnit
+      };
+      ownerArr.push(node);
+      for (const m of momentsOwned) {
+        links.push({
+          source: node.id, target: 'moment:' + m.editionKey,
+          kind: 'collector-moment',
+          serial: m.serial,
+          value: 0.6
+        });
+      }
+    }
+    // ownerArr is already in holdings-DESC order (we walked rankedOwners in
+    // order), and globalRank is already assigned — no sort or re-rank needed.
 
     // Inner circle: top 10 by full-dataset rank
     const INNER_N = Math.min(10, ownerArr.length);
@@ -870,11 +876,65 @@
       nodes.push(o);
     }
 
+    // ---- Hint annulus for owners 201-1000 (spec-003 Task 6) ----
+    // Owners ranked beyond FULL_NODE_LIMIT are not rendered as interactive
+    // nodes (that would overwhelm the scene), but we don't hide them silently:
+    // a faint THREE.Points annulus just outside the grey ring makes the rest of
+    // the collector universe visible as a glow. This is the honest rendering —
+    // the user can SEE that the graph continues beyond the top-200.
+    const hintOwners = rankedOwners.slice(FULL_NODE_LIMIT, Math.min(1000, rankedOwners.length));
+    let hintPoints = null;
+    if (hintOwners.length > 0) {
+      const hintGeom = new THREE.BufferGeometry();
+      const hintPos = new Float32Array(hintOwners.length * 3);
+      const hintCol = new Float32Array(hintOwners.length * 3);
+      // Annulus just outside the grey ring (GREY_RADIUS_OUTER=600 → 610-700)
+      const HINT_RADIUS_INNER = 610;
+      const HINT_RADIUS_OUTER = 700;
+      for (let i = 0; i < hintOwners.length; i++) {
+        const rank = FULL_NODE_LIMIT + 1 + i;
+        // Deterministic placement (mirrors the grey-ring seeding) so reloads are stable
+        const seed = (rank * 9301 + 49297) % 233280;
+        const r01 = seed / 233280;
+        const angle = r01 * Math.PI * 2;
+        const r = HINT_RADIUS_INNER + ((rank * 37) % 100) / 100 * (HINT_RADIUS_OUTER - HINT_RADIUS_INNER);
+        hintPos[i * 3]     = Math.cos(angle) * r;
+        hintPos[i * 3 + 1] = (((rank * 13) % 40) - 20);
+        hintPos[i * 3 + 2] = Math.sin(angle) * r;
+        // Gold (#f5b840) with per-point intensity variation for a natural glow
+        const intensity = 0.7 + ((rank * 17) % 30) / 100;
+        hintCol[i * 3]     = 0.96 * intensity;
+        hintCol[i * 3 + 1] = 0.72 * intensity;
+        hintCol[i * 3 + 2] = 0.25 * intensity;
+      }
+      hintGeom.setAttribute('position', new THREE.BufferAttribute(hintPos, 3));
+      hintGeom.setAttribute('color', new THREE.BufferAttribute(hintCol, 3));
+      const hintMat = new THREE.PointsMaterial({
+        size: 2.5,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.5,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true
+      });
+      hintPoints = new THREE.Points(hintGeom, hintMat);
+    }
+
+    // ---- Coverage disclosure (spec-003 Task 6) ----
+    // S = fully-simulated collector nodes; M = total owners in the dataset.
+    // These drive the "Showing top S of M collectors" affordance and the
+    // window.__fandomCoverage hook for the smoke test.
+    const coverageS = ownerArr.length;
+    const coverageM = p.owners.length;
+
     return {
       player: p,
       nodes, links,
       editionNodes,
       ownerArr,
+      hintPoints,
+      coverage: { S: coverageS, M: coverageM },
       stats: {
         editions: p.editions.length,
         totalMinted: p.totalMintedMomentCount,
@@ -896,6 +956,7 @@
 
   let starfieldMesh = null;
   let fogApplied = false;
+  let hintAnnulusMesh = null; // THREE.Points annulus for owners 201-1000 (honest top-N rendering)
 
   function addBackdropRings(scene) {
     for (const m of backdropMeshes) scene.remove(m);
@@ -1746,6 +1807,39 @@
         addFog(scene);
       }
     }, 450);
+
+    // ---- Honest top-N disclosure + hint annulus (spec-003 Task 6) ----
+    // Remove any previous hint annulus before adding the new one (covers the
+    // case where a second player loads without going back to the picker).
+    if (hintAnnulusMesh) {
+      const prevScene = g.scene();
+      if (prevScene) prevScene.remove(hintAnnulusMesh);
+      hintAnnulusMesh = null;
+    }
+    if (currentData.hintPoints) {
+      hintAnnulusMesh = currentData.hintPoints;
+      // Add after the scene adornments settle so the annulus layers cleanly
+      setTimeout(() => {
+        const scene = g.scene();
+        if (scene && hintAnnulusMesh) scene.add(hintAnnulusMesh);
+      }, 500);
+    }
+
+    // Coverage disclosure affordance — a small text element in the graph area,
+    // NOT a modal. Reads "Showing top S of M collectors" (or "all N" / "none").
+    const cov = currentData.coverage || { S: 0, M: 0 };
+    const coverageEl = document.getElementById('graph-coverage');
+    if (coverageEl) {
+      coverageEl.style.display = 'block';
+      if (cov.M === 0) {
+        coverageEl.textContent = 'No collector data available';
+      } else if (cov.M <= cov.S) {
+        coverageEl.textContent = 'Showing all ' + cov.M.toLocaleString() + ' collectors';
+      } else {
+        coverageEl.textContent = 'Showing top ' + cov.S + ' of ' + cov.M.toLocaleString() + ' collectors';
+      }
+    }
+    window.__fandomCoverage = { S: cov.S, M: cov.M };
   }
 
   // ======================= Leaderboard sidebar =======================
@@ -2588,6 +2682,16 @@
   function goBackToPicker() {
     if (window.__clearCollectorSpotlight) window.__clearCollectorSpotlight();
     if (Graph) Graph.graphData({ nodes: [], links: [] });
+    // Remove the hint annulus so it doesn't linger over the empty scene.
+    if (hintAnnulusMesh) {
+      const scene = Graph && Graph.scene();
+      if (scene) scene.remove(hintAnnulusMesh);
+      hintAnnulusMesh = null;
+    }
+    // Hide the coverage disclosure affordance.
+    const coverageEl = document.getElementById('graph-coverage');
+    if (coverageEl) { coverageEl.style.display = 'none'; coverageEl.textContent = ''; }
+    window.__fandomCoverage = null;
     ['graph-legend', 'graph-meta', 'graph-controls', 'graph-hint', 'leaderboard', 'spotlight-overlay', 'spotlight-stat'].forEach(id => {
       const el = document.getElementById(id); if (el) el.style.display = 'none';
     });
