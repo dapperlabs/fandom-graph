@@ -3500,53 +3500,29 @@
   // else: no auto-route. Picker is visible, graph-area hidden by CSS until first click.
 
   // ===== Mobile overlay toggles =====
-  // On mobile, overlays are collapsed by CSS. These JS hooks add toggle buttons.
-  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+  // On mobile, overlays are collapsed by CSS (@media max-width:768px).
+  // These JS hooks add interactive toggles for the user to expand them.
 
-  // Legend toggle button (top-left on mobile)
+  // Legend toggle button (top-left on mobile, shown/hidden by CSS media query)
   const legendToggle = document.createElement('button');
   legendToggle.className = 'mobile-toggle-btn';
   legendToggle.textContent = '☰';
   legendToggle.title = 'Toggle legend';
-  legendToggle.style.display = 'none';
   legendToggle.addEventListener('click', () => {
     const legend = document.getElementById('graph-legend');
     if (legend) legend.classList.toggle('mobile-visible');
   });
-  document.querySelector('.graph-area').appendChild(legendToggle);
+  const graphAreaEl = document.querySelector('.graph-area');
+  if (graphAreaEl) graphAreaEl.appendChild(legendToggle);
 
   // Meta panel: tap to expand stats on mobile
   const meta = document.getElementById('graph-meta');
   if (meta) {
     meta.addEventListener('click', () => {
-      if (isMobile()) meta.classList.toggle('mobile-expanded');
+      if (window.matchMedia('(max-width: 768px)').matches) {
+        meta.classList.toggle('mobile-expanded');
+      }
     });
   }
-
-  // Show/hide the toggle button when graph becomes visible
-  const showMobileControls = () => {
-    if (isMobile()) {
-      legendToggle.style.display = 'flex';
-    } else {
-      legendToggle.style.display = 'none';
-      // Reset desktop state
-      const legend = document.getElementById('graph-legend');
-      if (legend) legend.classList.remove('mobile-visible');
-      if (meta) meta.classList.remove('mobile-expanded');
-    }
-  };
-
-  // Watch for graph visibility changes
-  const graphArea = document.querySelector('.graph-area');
-  if (graphArea) {
-    const observer = new MutationObserver(() => {
-      const legend = document.getElementById('graph-legend');
-      if (legend && legend.style.display !== 'none') showMobileControls();
-    });
-    observer.observe(graphArea, { attributes: true, subtree: true, attributeFilter: ['style'] });
-  }
-
-  // Also respond to viewport changes (orientation, resize)
-  window.addEventListener('resize', showMobileControls);
 })();
 

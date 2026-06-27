@@ -3755,8 +3755,8 @@ footer .footer-inner code { font-family: var(--mono); color: var(--fg-muted); }
     right: 14px;
   }
   .graph-meta .player-name { font-size: 16px; }
-  .graph-meta .row { display: none; }
-  .graph-meta.mobile-expanded .row { display: flex; }
+  .graph-meta .row { display: none !important; }
+  .graph-meta.mobile-expanded .row { display: flex !important; }
   .graph-meta.mobile-expanded { max-width: 260px; }
 
   /* Controls: compact, bottom-left, smaller buttons */
