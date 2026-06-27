@@ -1,9 +1,54 @@
-// Fandom Graph v6 — Pride layer: inner circle, profile images, rank badges, leaderboard, spotlight mode
-// V3: per-player on-demand loading via window.DataLayer (data-layer.js ES module).
+// Fandom Graph — 3D pride engine for NBA Top Shot collectors.
+//
+// WHAT THIS FILE IS
+//   The client-side visualization that turns per-player Top Shot ownership data into a
+//   navigable 3D universe. A collector lands on a player picker, clicks one, and their
+//   "fandom universe" materializes: the player at the center, an edition ring around them,
+//   and collector nodes arranged in concentric tiered rings out to the edges.
+//
+// ARCHITECTURE
+//   Picker → Player Universe Graph
+//     Player center node (the sun)
+//       → Edition ring (moment sets, sized by market value, tier-colored)
+//         → Collector nodes (owners, tiered gold/teal/silver/grey by holdings rank)
+//
+//   Drill-down levels:
+//     L2 Player (default)    — player center + editions + all collectors
+//     L3 Edition              — one edition center + its top holders + serial beads
+//     L4 Collector-Universe   — spotlight mode: one collector center + players they
+//                                collect + their top moments (entered via drawer CTA)
+//
+// DATA CONTRACT
+//   Consumes /data/{playerId}.json via window.DataLayer (data-layer.js, SPEC-002 shape).
+//   Each payload: { name, team, teamSlug, teamColors, totalMintedMomentCount,
+//                   editions[], owners[] } with editions[].serialsSampled[] linking
+//   serials to ownerFlowAddress. The DataLayer handles fetch + cache + progress events.
+//
+// RENDERING PIPELINE
+//   3d-force-graph (ForceGraph3D) drives the scene graph + layout engine.
+//   Three.js sprites (makeAvatarSprite, makeMomentCard, makeTextSprite) render nodes as
+//   canvas-textured billboards — avatar circles, moment cards, and labels.
+//   UnrealBloomPass + film-grain/chromatic-aberration ShaderPass chain on the post-
+//   processing composer for the cinematic glow + filmic finish.
+//   Backdrop rings, a 3500-star spherical shell, and depth fog frame the data.
+//
+// URL ROUTER
+//   window.fandomRouter (router.js) drives deep links:
+//     ?player=<name>              → L2 Player view
+//     ?player=<name>&spotlight=<addr>  → L2 + collector spotlight overlay
+//     ?collector=<addr>           → L4 Collector-Universe
+//     ?player=<name>&edition=<key>     → L3 Edition view
+//   ESC / back-button pops one level. The picker is the lander — no URL param = picker.
+//
+// BOOT SEQUENCE
+//   1. Render picker from bundled DataLayer.PLAYERS (fast first paint)
+//   2. Async-merge /data/index.json (full top-40 roster with mint counts)
+//   3. On click or deep-link: loadAndRoutePlayer → DataLayer.loadPlayer → buildGraph →
+//      showGraphFor → ensureGraph (lazy ForceGraph3D instance) → cinematic camera intro
 (async function () {
   // Enrich picker counts from index.json in background (non-blocking)
   if (window.DataLayer?.initIndex) DataLayer.initIndex().catch(() => {});
-  // V3: data.players is empty at boot; populated per-player on demand.
+  // data.players is empty at boot; populated per-player on demand.
   let data = { players: [] };
 
   function esc(v) {
@@ -88,7 +133,7 @@
   }
 
   // ======================= Cross-player index =======================
-  // V3: only ever holds 1 player's data at a time (data.players.length <= 1),
+  // Only ever holds 1 player's data at a time (data.players.length <= 1),
   // but we keep the same index shape so downstream code (crossPlayerCount,
   // ownerMasterData reads) doesn't change.
   let ownerPlayerMap = new Map(); // key -> Set<playerName>
@@ -115,7 +160,7 @@
   }
 
   // ======================= Picker (metadata-only, searchable) =======================
-  // V3 scale: PLAYERS_META starts with the in-bundle DataLayer.PLAYERS (fast first-paint),
+  // PLAYERS_META starts with the in-bundle DataLayer.PLAYERS (fast first-paint),
   // then `/data/index.json` fetches + merges the full top-40 roster.
   let PLAYERS_META = (window.DataLayer && window.DataLayer.PLAYERS) ? window.DataLayer.PLAYERS.slice() : [];
   const grid = document.getElementById('player-grid');
@@ -154,7 +199,7 @@
     return card;
   }
 
-  // V3: flat grid, sorted by mint volume — 20 players don't need conference/team scaffolding.
+  // Flat grid, sorted by mint volume — 20 players don't need conference/team scaffolding.
   function renderPickerGrid() {
     while (grid.firstChild) grid.removeChild(grid.firstChild);
     grid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;';
@@ -291,7 +336,7 @@
   let _pendingLoadToken = 0;
   async function loadAndRoutePlayer(idOrName, spotlight) {
     if (!window.DataLayer) {
-      console.error('[v3] window.DataLayer missing — data-layer.js did not load');
+      console.error('[fandom] window.DataLayer missing — data-layer.js did not load');
       return;
     }
     const key = String(idOrName ?? '').trim();
@@ -314,7 +359,7 @@
       } catch (e) { /* fall through to warn */ }
     }
     if (!meta) {
-      console.warn('[v3] unknown player id/name in picker:', idOrName);
+      console.warn('[fandom] unknown player id/name in picker:', idOrName);
       return;
     }
     const playerName = meta.name;
@@ -336,7 +381,7 @@
         const before = payload.owners.length;
         payload.owners = payload.owners.filter(o => !isSystem(o));
         const removed = before - payload.owners.length;
-        if (removed) console.log(`[v3] filtered ${removed} system account(s) from ${payload.name}`);
+        if (removed) console.log(`[fandom] filtered ${removed} system account(s) from ${payload.name}`);
       }
       // Also strip system addresses from per-edition serial samples so they don't appear
       // as bonds in the graph or in spotlight ownership math.
@@ -358,12 +403,12 @@
       window.fandomRouter.go('player', { player: playerName, spotlight: spotlight || null });
     } catch (err) {
       if (token !== _pendingLoadToken) return;
-      console.error('[v3] loadPlayer failed:', err);
+      console.error('[fandom] loadPlayer failed:', err);
       showPlayerError(playerName, err, () => loadAndRoutePlayer(playerName, spotlight));
     }
   }
   // Expose for router-driven initial load + any external trigger
-  window.__fandomV3 = { loadAndRoutePlayer };
+  window.__fandom = { loadAndRoutePlayer };
 
   // ======================= Three.js sprite helpers =======================
   const THREE = window.THREE;
@@ -765,7 +810,7 @@
       o.isInnerCircle = true;
       o.rankBadge = o.globalRank;
     }
-    // v2: pre-bucket for deterministic ring layout. Layout is stable across reloads.
+    // Pre-bucket for deterministic ring layout. Layout is stable across reloads.
     const tealOwners = ownerArr.filter(o => o.globalRank > 10 && o.globalRank <= 50);
     const silverOwners = ownerArr.filter(o => o.globalRank > 50 && o.globalRank <= 200);
     const TEAL_RADIUS = 310;
@@ -777,7 +822,7 @@
     // Max value for normalizing collector node sizes
     const maxValueHeld = Math.max(1, ...ownerArr.map(o => o.valueHeld || 0));
 
-    // Tier tagging + v2 deterministic ring pinning; size by market value held
+    // Tier tagging + deterministic ring pinning; size by market value held
     for (const o of ownerArr) {
       const rank = o.globalRank;
       const total = p.owners.length;
@@ -796,7 +841,7 @@
         : o.crossPlayerFan ? '#ff9a4a'
         : 'rgba(240,242,253,0.42)';
 
-      // v2: pin by tier ring (gold already pinned above in inner-circle loop)
+      // Pin by tier ring (gold already pinned above in inner-circle loop)
       if (o.tier === 'teal') {
         const i = tealIdx++;
         const angle = (i / Math.max(1, tealOwners.length)) * Math.PI * 2 + 0.13;
@@ -874,7 +919,7 @@
   function addStarfield(scene) {
     if (starfieldMesh) return; // already added
     const geom = new THREE.BufferGeometry();
-    // V3 dial-down: 6000 → 3500 stars (less visual clutter behind the data)
+    // 3500 stars (less visual clutter behind the data)
     const count = 3500;
     const pos = new Float32Array(count * 3);
     const col = new Float32Array(count * 3);
@@ -916,13 +961,13 @@
 
   function addFog(scene) {
     if (fogApplied) return;
-    // V3 navigation pass: fog pushed way back so nodes stay visible at any zoom.
+    // Fog pushed way back so nodes stay visible at any zoom.
     // Near at 4000 (well past typical orbit), Far at 14000 (past maxDistance).
     scene.fog = new THREE.Fog(0x05060c, 4000, 14000);
     fogApplied = true;
   }
 
-  // T1.01 — Add one UnrealBloomPass to the 3d-force-graph post-processing composer.
+  // Post-processing: bloom pass — one UnrealBloomPass on the 3d-force-graph composer.
   let bloomInstalled = false;
   function installBloom(Graph) {
     if (bloomInstalled) return;
@@ -938,7 +983,7 @@
     if (!composer) return;
     const w = window.innerWidth;
     const h = window.innerHeight;
-    // V3 dial-down: bloom strength 0.9→0.4, radius 0.6→0.5, threshold 0.35→0.55 (subtle glow, not blown out)
+    // Subtle glow, not blown out (strength 0.4, radius 0.5, threshold 0.55)
     const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.5, 0.55);
     composer.addPass(bloom);
     bloomInstalled = true;
@@ -948,7 +993,7 @@
     });
   }
 
-  // T1.06 — Add one ShaderPass (film grain + radial chromatic aberration) AFTER bloom.
+  // Post-processing: film grain + radial chromatic aberration ShaderPass (chained after bloom).
   // Subtle filmic finish: per-frame random noise + RGB channel offset radiating from screen edges.
   let grainCAInstalled = false;
   function installGrainCA(Graph) {
@@ -1019,13 +1064,6 @@
     Graph = ForceGraph3D()(container)
       .backgroundColor('rgba(0,0,0,0)')
       .nodeLabel(n => {
-        if (n.type === 'team-logo') {
-          return `<div style="font-family:Sofia Sans Extra Condensed,sans-serif; font-weight:900; font-size:18px; text-transform:uppercase; background:rgba(0,0,0,0.92); padding:10px 14px; border-radius:6px; color:#fff; border:2px solid ${esc(n.colorPrimary)};">${esc(n.name)}<br/><span style="font-size:10px; font-weight:500; color:#aaa; letter-spacing:0.1em;">${esc(n.conf)} · ${esc(n.div)}</span></div>`;
-        }
-        if (n.type === 'league-center') {
-          return '<div style="font-family:Sofia Sans Extra Condensed,sans-serif; font-weight:800; font-size:14px; background:rgba(0,0,0,0.85); padding:8px 12px; border-radius:6px; color:#fff; text-transform:uppercase; letter-spacing:0.12em;">Fandom Graph — League overview</div>';
-        }
-        if (n.type === 'whale-hint') return '';
         if (n.type === 'collector-hint') return '';
         if (n.type === 'collector-center') {
           return `<div style="font-family:Sofia Sans Extra Condensed,sans-serif; background:rgba(0,0,0,0.92); padding:10px 14px; border-radius:6px; color:#fff; border:2px solid #f5b840; font-size:13px;"><b style="font-size:18px; text-transform:uppercase; letter-spacing:0.02em;">${esc(n.name)}</b><br/><span style="color:#f5b840; font-size:11px; letter-spacing:0.12em; text-transform:uppercase;">Your universe · ${n.totalHoldings.toLocaleString()} serials</span></div>`;
@@ -1053,68 +1091,7 @@
         }
       })
       .nodeThreeObject(n => {
-        // IA.02 — L0 League view node types
-        if (n.type === 'league-center') {
-          const group = new THREE.Group();
-          group.add(glowSprite(new THREE.Color('#5b6fff'), 260, 0.5));
-          group.add(glowSprite(new THREE.Color('#14d8c4'), 160, 0.42));
-          const wordmark = makeTextSprite('NBA', {
-            fontSize: 160, fontWeight: 900, color: '#ffffff',
-            bg: 'rgba(0,0,0,0.0)', borderColor: null, paddingX: 4, paddingY: 2, scale: 2.2
-          });
-          group.add(wordmark);
-          const tag = makeTextSprite('THE FANDOM GRAPH', {
-            fontSize: 28, fontWeight: 700, color: 'rgba(240,242,253,0.82)',
-            bg: 'rgba(0,0,0,0.0)', borderColor: null, paddingX: 2, paddingY: 2, scale: 6
-          });
-          tag.position.set(0, -62, 0);
-          group.add(tag);
-          n.__group = group;
-          return group;
-        }
-        if (n.type === 'team-logo') {
-          const group = new THREE.Group();
-          const size = 26;
-          // Placeholder ring while logo loads — colored rim + abbreviation
-          const placeholder = new THREE.Mesh(
-            new THREE.SphereGeometry(size * 0.42, 18, 18),
-            new THREE.MeshBasicMaterial({ color: n.colorPrimary })
-          );
-          placeholder.userData.isPlaceholder = true;
-          group.add(placeholder);
-          // Color ring halo (team primary + secondary glow)
-          group.add(glowSprite(new THREE.Color(n.colorPrimary), size * 3.4, 0.55));
-          group.add(glowSprite(new THREE.Color(n.colorSecondary || n.colorPrimary), size * 2.1, 0.45));
-          // Team abbreviation label below
-          const abbr = makeTextSprite(n.abbr, {
-            fontSize: 30, fontWeight: 900, color: '#ffffff',
-            bg: 'rgba(0,0,0,0.82)', borderColor: n.colorPrimary, scale: 5
-          });
-          abbr.position.set(0, -size * 1.4, 0);
-          group.add(abbr);
-          // Async: compose the real logo sprite and swap in
-          composeTeamLogoSprite(n.logoUrl, n.colorPrimary, n.colorSecondary, n.abbr, size * 2.4).then(sprite => {
-            if (sprite) {
-              group.remove(placeholder);
-              group.add(sprite);
-              n.__logoSprite = sprite;
-            }
-          }).catch(() => { /* fallback placeholder stays */ });
-          n.__group = group;
-          return group;
-        }
-        if (n.type === 'whale-hint') {
-          // Tiny gold dot — part of the outer hinted ring at L0
-          const mesh = new THREE.Mesh(
-            new THREE.SphereGeometry(0.6, 6, 6),
-            new THREE.MeshBasicMaterial({ color: 0xf5b840, transparent: true, opacity: 0.75 })
-          );
-          const g = new THREE.Group();
-          g.add(mesh);
-          g.add(glowSprite(new THREE.Color('#f5b840'), 3.5, 0.55));
-          return g;
-        }
-        // IA.05 — L4 Collector-Universe node types
+        // L4 Collector-Universe node types
         if (n.type === 'collector-hint') {
           // Faint gold outer-annulus particle hinting at more moments
           const mesh = new THREE.Mesh(
@@ -1130,7 +1107,7 @@
           const group = new THREE.Group();
           const size = n.val || 26;
           const avatarSize = size * 2.4;
-          // Tuned gold dual glow for pride-moment presence (iter-5 softer pass — avatar no longer washes out)
+          // Tuned gold dual glow for pride-moment presence
           group.add(glowSprite(new THREE.Color('#f5b840'), size * 5, 0.5));
           group.add(glowSprite(new THREE.Color('#ffd74a'), size * 3, 0.45));
           // Placeholder core while avatar loads
@@ -1228,105 +1205,6 @@
           n.__group = group;
           return group;
         }
-        // IA.03 — L1 Team view node types
-        if (n.type === 'roster-player') {
-          const group = new THREE.Group();
-          const size = n.val || 19;
-          const core = new THREE.Mesh(
-            new THREE.SphereGeometry(size * 0.5, 24, 24),
-            new THREE.MeshBasicMaterial({ color: n.teamColorPrimary })
-          );
-          group.add(core);
-          const ring = new THREE.Mesh(
-            new THREE.RingGeometry(size * 0.7, size * 0.82, 64),
-            new THREE.MeshBasicMaterial({ color: n.teamColorSecondary || n.teamColorPrimary, side: THREE.DoubleSide, transparent: true, opacity: 0.92 })
-          );
-          ring.rotation.x = Math.PI / 2;
-          group.add(ring);
-          group.add(glowSprite(new THREE.Color(n.teamColorPrimary), size * 5, 0.5));
-          group.add(glowSprite(new THREE.Color(n.teamColorSecondary || n.teamColorPrimary), size * 7, 0.58));
-          const nameSprite = makeTextSprite(n.name.toUpperCase(), {
-            fontSize: 38, fontWeight: 900, bg: 'rgba(0,0,0,0.82)',
-            borderColor: n.teamColorPrimary, color: '#fff', scale: 5
-          });
-          nameSprite.position.set(0, -size * 1.5, 0);
-          group.add(nameSprite);
-          const roleSprite = makeTextSprite('ROSTER', {
-            fontSize: 18, bg: 'rgba(0,0,0,0.6)',
-            borderColor: 'rgba(255,255,255,0.15)', color: 'rgba(240,242,253,0.6)', scale: 6
-          });
-          roleSprite.position.set(0, -size * 2.05, 0);
-          group.add(roleSprite);
-          n.__group = group;
-          return group;
-        }
-        if (n.type === 'team-edition') {
-          const group = new THREE.Group();
-          const size = 6;
-          group.add(glowSprite(new THREE.Color(tierColor(n.tier)), size * 10, 0.55));
-          const placeholder = new THREE.Mesh(
-            new THREE.SphereGeometry(size * 0.9, 18, 18),
-            new THREE.MeshBasicMaterial({ color: tierColor(n.tier) })
-          );
-          placeholder.userData.isPlaceholder = true;
-          group.add(placeholder);
-          if (n.heroUrl) {
-            makeMomentCard(n.heroUrl, size * 5.5, tierColor(n.tier), n.setName).then(card => {
-              group.remove(placeholder);
-              group.add(card);
-              n.__card = card;
-            });
-          }
-          // Ultimate ring decoration
-          if (n.tier && n.tier.includes('ULTIMATE')) {
-            const ring = new THREE.Mesh(
-              new THREE.RingGeometry(size * 3.1, size * 3.6, 64),
-              new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false })
-            );
-            ring.lookAt(new THREE.Vector3(0, 0, 1));
-            group.add(ring);
-            n.__ultimateRing = ring;
-          }
-          const lbl = makeTextSprite(tierLabel(n.tier).toUpperCase(), {
-            fontSize: 20, bg: 'rgba(0,0,0,0.78)', borderColor: tierColor(n.tier), color: '#fff', scale: 7
-          });
-          lbl.position.set(0, -size * 3.2, 0);
-          group.add(lbl);
-          n.__group = group;
-          return group;
-        }
-        if (n.type === 'team-collector') {
-          const group = new THREE.Group();
-          const size = 5;
-          const avatarSize = size * 3;
-          const placeholder = new THREE.Mesh(
-            new THREE.SphereGeometry(size * 0.8, 16, 16),
-            new THREE.MeshBasicMaterial({ color: '#f5b840' })
-          );
-          placeholder.userData.isPlaceholder = true;
-          group.add(placeholder);
-          const fallback = initials(n.name);
-          makeAvatarSprite(n.profileImageUrl, avatarSize, '#f5b840', fallback).then(avatar => {
-            group.remove(placeholder);
-            group.add(avatar);
-            n.__avatar = avatar;
-          });
-          const rankSprite = makeTextSprite(`#${n.teamRank}`, {
-            fontSize: 52, fontWeight: 900, color: '#f5b840',
-            bg: 'rgba(0,0,0,0.92)', borderColor: '#f5b840', paddingX: 14, paddingY: 6, scale: 4.5
-          });
-          rankSprite.position.set(0, size * 2.4, 0);
-          group.add(rankSprite);
-          const nameSprite = makeTextSprite(n.name, {
-            fontSize: 22, color: '#fff',
-            bg: 'rgba(0,0,0,0.82)', borderColor: 'rgba(245,184,64,0.4)', scale: 7
-          });
-          nameSprite.position.set(0, -size * 2.2, 0);
-          group.add(nameSprite);
-          group.add(glowSprite(new THREE.Color('#f5b840'), size * 5, 0.55));
-          n.__group = group;
-          return group;
-        }
         if (n.type === 'edition-center') {
           const group = new THREE.Group();
           // Big glow behind the card
@@ -1341,7 +1219,7 @@
             group.add(ring);
             n.__ultimateRing = ring;
           }
-          // V3: edition hero card sized down from 80 → 42 so holders can breathe.
+          // Edition hero card sized down so holders can breathe.
           // The holders are the stars of L3, not the edition card.
           const placeholder = new THREE.Mesh(
             new THREE.SphereGeometry(8, 20, 20),
@@ -1363,7 +1241,7 @@
           return group;
         }
         if (n.type === 'serial-bead') {
-          // V3: serial beads demoted to tiny gold sparks. Human names are the visual focus,
+          // Serial beads are tiny gold sparks. Human names are the visual focus,
           // not the abstract serial dots. Beads are ambient (there are lots of them).
           const group = new THREE.Group();
           const color = n.isUserOwned ? '#ffffff' : '#f5b840';
@@ -1456,7 +1334,7 @@
 
         // Collector
         const group = new THREE.Group();
-        // V3 "feel proud" pass: scale up every tier. Whales get crown treatment, teal gets real
+        // Collector tier rendering: scale up every tier. Top-10 get crown treatment,
         // avatars + names, even silver tier gets a small avatar + name (not just a grey dot).
         const size = Math.sqrt(n.val) * 2.0;
 
@@ -1478,7 +1356,7 @@
             n.__avatar = avatar;
           });
 
-          // V3: #1 holder gets a gold crown overhead — "feel proud" moment
+          // #1 holder gets a gold crown overhead — pride moment
           if (n.globalRank === 1) {
             const crown = makeTextSprite('👑', { fontSize: 64, bg: 'rgba(0,0,0,0)', borderColor: null, paddingX: 0, paddingY: 0, scale: 3.5 });
             crown.position.set(0, size * 3.6, 0);
@@ -1523,7 +1401,7 @@
           group.add(nameSprite);
           group.add(glowSprite(new THREE.Color('#14d8c4'), size * 4.5, 0.3));
         } else if (n.tier === 'silver') {
-          // V3: silver tier now gets identity — small avatar + dimmer name. Still visible, still clickable.
+          // Silver tier gets identity — small avatar + dimmer name. Still visible, still clickable.
           const avatarSize = size * 2.2;
           const fallback = initials(n.name);
           makeAvatarSprite(n.profileImageUrl, avatarSize, '#d4d4d9', fallback).then(avatar => {
@@ -1554,8 +1432,6 @@
         return group;
       })
       .linkColor(l => {
-        if (l.kind === 'team-roster') return l.strokeColor || 'rgba(255,255,255,0.55)';
-        if (l.kind === 'team-edition-link') return l.strokeColor || 'rgba(255,217,107,0.55)';
         if (l.kind === 'collector-to-player') return l.strokeColor || 'rgba(245,184,64,0.55)';
         if (l.kind === 'player-moment') return 'rgba(255,217,107,0.55)';
         const srcNode = typeof l.source === 'object' ? l.source : null;
@@ -1566,8 +1442,6 @@
       })
       .linkOpacity(0.55)
       .linkWidth(l => {
-        if (l.kind === 'team-roster') return 2.0;
-        if (l.kind === 'team-edition-link') return 1.6;
         if (l.kind === 'collector-to-player') return 1.8;
         if (l.kind === 'player-moment') return 1.8;
         const srcNode = typeof l.source === 'object' ? l.source : null;
@@ -1576,8 +1450,6 @@
         return 0.35;
       })
       .linkDirectionalParticles(l => {
-        if (l.kind === 'team-roster') return 2;
-        if (l.kind === 'team-edition-link') return 3;
         if (l.kind === 'collector-to-player') return 3;
         if (l.kind === 'player-moment') return 3;
         const srcNode = typeof l.source === 'object' ? l.source : null;
@@ -1586,8 +1458,6 @@
       })
       .linkDirectionalParticleSpeed(0.008)
       .linkDirectionalParticleColor(l => {
-        if (l.kind === 'team-roster') return l.particleColor || '#ffffff';
-        if (l.kind === 'team-edition-link') return l.particleColor || '#ffd96b';
         if (l.kind === 'collector-to-player') return l.particleColor || '#ffd96b';
         if (l.kind === 'player-moment') return '#ffd96b';
         return '#f5b840';
@@ -1605,31 +1475,7 @@
           flyToNode(node, 100);
           return;
         }
-        if (node.type === 'team-logo') {
-          // At L1 the center team-logo node's id is prefixed 'team:<slug>:center' — go back to L0.
-          if (typeof node.id === 'string' && node.id.endsWith(':center')) {
-            window.fandomRouter.go('league', {});
-            return;
-          }
-          window.fandomRouter.go('team', { team: node.slug });
-          return;
-        }
-        if (node.type === 'league-center' || node.type === 'whale-hint') {
-          return;
-        }
-        if (node.type === 'roster-player') {
-          window.fandomRouter.go('player', { player: node.playerName });
-          return;
-        }
-        if (node.type === 'team-edition') {
-          window.fandomRouter.go('edition', { key: node.editionKey, player: node.playerName });
-          return;
-        }
-        if (node.type === 'team-collector') {
-          openCollectorDrawer(node);
-          return;
-        }
-        // L4 Collector-Universe — IA.05
+        // L4 Collector-Universe
         if (node.type === 'collector-center' || node.type === 'collector-hint') {
           // Center: toggle drawer. Hint particles: no-op.
           if (node.type === 'collector-center') {
@@ -1656,7 +1502,7 @@
           return;
         }
         if (node.type === 'collector') {
-          // V3: camera flies to collector, drawer opens, AND graph enters spotlight mode —
+          // Camera flies to collector, drawer opens, AND graph enters spotlight mode —
           // everything except this collector + the editions they own fades back, with a
           // "owns X of Y · N%" badge across the top. Click the badge or hit ESC to clear.
           flyToNode(node, 85);
@@ -1674,7 +1520,7 @@
           return;
         }
         else if (node.type === 'serial-bead') {
-          // V3: fly in close to the serial so the user sees they've actually selected something,
+          // Fly in close to the serial so the user sees they've actually selected something,
           // then show the preview card. Sparks are tiny — the fly-in is part of the confirmation.
           flyToNode(node, 32);
           showSerialPreview(node);
@@ -1684,7 +1530,7 @@
         flyToNode(node, 160);
       });
 
-    // V3: universal camera-focus-on-click. Smoothly flies the camera TO the clicked node
+    // Universal camera-focus-on-click. Smoothly flies the camera TO the clicked node
     // at the supplied distance, looking at the node. Unlike the old code that used cameraPosition
     // with `node` as lookAt (which pivots), this sets an explicit world-space target offset.
     function flyToNode(node, desiredDistance = 120) {
@@ -1739,8 +1585,7 @@
       return 140;
     });
 
-    // T1.01 — UnrealBloomPass cinematic glow. Defers a tick so 3d-force-graph's composer is live.
-    // T1.06 — Film grain + chromatic aberration chained after bloom for a filmic finish.
+    // Bloom + film grain: deferred a tick so 3d-force-graph's composer is live.
     setTimeout(() => { installBloom(Graph); installGrainCA(Graph); }, 120);
 
     // Add backdrop + starfield + fog once scene is available
@@ -1753,7 +1598,7 @@
       }
     }, 100);
 
-    // V3: unlock full pan/zoom/orbit navigation. 3d-force-graph uses OrbitControls internally;
+    // Unlock full pan/zoom/orbit navigation. 3d-force-graph uses OrbitControls internally;
     // defaults disable pan and clamp zoom. Unlocking so the user can fly through the data field.
     setTimeout(() => {
       if (typeof Graph.controls !== 'function') return;
@@ -1904,7 +1749,7 @@
   }
 
   // ======================= Leaderboard sidebar =======================
-  // T1.10 helper — tier weight for sparkline bar ordering (ultimate brightest, first).
+  // Tier weight for sparkline bar ordering (ultimate brightest, first).
   const SPARK_TIER_WEIGHT = { ultimate: 5, legendary: 4, anthology: 3, rare: 2, common: 1 };
   const SPARK_TIER_COLOR = {
     ultimate: '#fff3c0',
@@ -1914,7 +1759,7 @@
     common: '#8d8d96'
   };
 
-  // T1.10 — Aggregate an owner's per-edition holdings across the player's sampled serials.
+  // Aggregate an owner's per-edition holdings across the player's sampled serials.
   // Returns up to 12 {editionKey, tier, count} buckets, tier-weighted sorted (ultimate first).
   function editionHoldingsForOwner(ownerId, player) {
     if (!ownerId || !player || !Array.isArray(player.editions)) return [];
@@ -1941,7 +1786,7 @@
     return buckets.slice(0, 12);
   }
 
-  // T1.10 — Build an inline 120x18 SVG string of vertical bars per-edition, tier-colored, log-scaled.
+  // Build an inline 120x18 SVG string of vertical bars per-edition, tier-colored, log-scaled.
   function renderSparklineSVG(distribution) {
     const W = 120, H = 18, N = 12;
     if (!distribution || !distribution.length) {
@@ -2017,7 +1862,7 @@
       row.appendChild(infoEl);
       row.appendChild(holdEl);
 
-      // T1.10 — per-edition fingerprint sparkline for this collector's holdings shape
+      // Per-edition fingerprint sparkline for this collector's holdings shape
       const sparkWrap = document.createElement('div');
       sparkWrap.className = 'lb-spark-wrap';
       const distribution = editionHoldingsForOwner(o.id, p);
@@ -2070,11 +1915,6 @@
 
   function openCollectorDrawer(n) {
     clearDrawer();
-    // L1 Team context: currentPlayer === null and n.type === 'team-collector'. Render a team-scoped variant.
-    if (!currentPlayer && n.type === 'team-collector') {
-      openTeamCollectorDrawer(n);
-      return;
-    }
     const p = data.players.find(x => x.name === currentPlayer);
     if (!p) return; // defensive — shouldn't happen at L2
     const total = p.owners.length;
@@ -2189,7 +2029,7 @@
     // Actions
     const actions = mkEl('div', { className: 'detail-actions', style: 'margin-top: 14px;' });
 
-    // V3 Phase A: explicit commit — "Visit their universe →" — only navigating on button press
+    // Explicit commit — "Visit their universe →" — only navigating on button press
     if (n.flowAddress) {
       const visitBtn = mkEl('button', { className: 'btn-sm btn-primary', text: 'Visit their universe →' });
       visitBtn.style.cssText += 'background: linear-gradient(135deg, #14d8c4, #5b6fff); color: #05060c; font-weight: 800; border: none;';
@@ -2215,7 +2055,7 @@
     drawer.classList.add('open');
   }
 
-  // V3 Phase A: serial-bead preview. Single click shows a small floating card with owner info
+  // Serial-bead preview. Single click shows a small floating card with owner info
   // + "Visit owner →" commit button. Misclick closes the card, user stays at L3.
   function showSerialPreview(node) {
     // Find the owner record on this player for richer context
@@ -2324,42 +2164,6 @@
     }, 50);
   }
 
-  // L1 team-collector drawer — team-scoped rank, holdings, and deep link to a specific player-level spotlight.
-  function openTeamCollectorDrawer(n) {
-    clearDrawer();
-    const hero = mkEl('div', { className: 'collector-hero' });
-    const av = mkEl('div', { className: 'collector-hero-avatar' });
-    if (n.profileImageUrl) av.style.backgroundImage = `url("${n.profileImageUrl.replace(/"/g, '&quot;')}")`;
-    else av.textContent = initials(n.name);
-    hero.appendChild(av);
-    const meta = mkEl('div', { className: 'collector-hero-meta' });
-    meta.appendChild(mkEl('div', { className: 'collector-hero-rank', text: `#${n.teamRank}` }));
-    meta.appendChild(mkEl('div', { className: 'collector-hero-label', text: `Team collector · in this graph` }));
-    meta.appendChild(mkEl('div', { className: 'collector-hero-username', text: n.name }));
-    hero.appendChild(meta);
-    drawerInner.appendChild(hero);
-
-    const rarRow = mkEl('div', { className: 'rar-row' });
-    const sp1 = document.createElement('span');
-    sp1.innerHTML = `<strong>${n.teamHoldings.toLocaleString()}</strong> serials held · this team`;
-    rarRow.appendChild(sp1);
-    const sp2 = document.createElement('span');
-    sp2.innerHTML = `<strong>${n.playersOnTeamCount}</strong> roster player${n.playersOnTeamCount === 1 ? '' : 's'} collected`;
-    rarRow.appendChild(sp2);
-    drawerInner.appendChild(rarRow);
-
-    // Actions
-    const actions = mkEl('div', { className: 'detail-actions', style: 'margin-top: 14px;' });
-    if (n.flowAddress) {
-      actions.appendChild(mkEl('a', { className: 'btn-sm', text: 'Flowscan ↗', href: `https://www.flowscan.io/account/0x${n.flowAddress.replace(/^0x/, '')}`, target: '_blank', rel: 'noopener' }));
-    }
-    if (n.username) {
-      actions.appendChild(mkEl('a', { className: 'btn-sm', text: `@${n.username} on Top Shot ↗`, href: `https://nbatopshot.com/user/@${n.username}`, target: '_blank', rel: 'noopener' }));
-    }
-    drawerInner.appendChild(actions);
-
-    drawer.classList.add('open');
-  }
 
   function openMomentDrawer(n) {
     const e = n.edition;
@@ -2551,7 +2355,7 @@
       const tgt = typeof l.target === 'object' ? l.target : null;
       const involves = (n) => n && (
         (n.type === 'collector' && n.flowAddress === _spotlitAddr) ||
-        ((n.type === 'moment' || n.type === 'edition-center' || n.type === 'team-edition') && ownedKeys.has(n.editionKey))
+        ((n.type === 'moment' || n.type === 'edition-center') && ownedKeys.has(n.editionKey))
       );
       return involves(src) || involves(tgt);
     });
@@ -2565,7 +2369,7 @@
       let op;
       if (n.type === 'collector') {
         op = 1.0; // either spotlit (visible) or hidden — set to 1
-      } else if (n.type === 'moment' || n.type === 'edition-center' || n.type === 'team-edition') {
+      } else if (n.type === 'moment' || n.type === 'edition-center') {
         op = ownedKeys.has(n.editionKey) ? 1.0 : 0.18;
       } else {
         op = 0.85;
@@ -2791,9 +2595,7 @@
     document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
     if (drawer) drawer.classList.remove('open');
     document.body.classList.remove('viewing-player');
-    // V3: do NOT call router.go('league') here — league view renders the NBA team-bubble
-    // graph and pollutes graph-meta with "NBA / 30 teams / 0 surfaced" which leaks into
-    // the next player view. Just clear the URL state directly.
+    // Just clear the URL state directly — don't route to a home view.
     if (window.history && window.history.replaceState) {
       window.history.replaceState(null, '', window.location.pathname);
     }
@@ -2832,7 +2634,7 @@
     if (Graph) Graph.width(container.clientWidth).height(container.clientHeight);
   });
 
-  // ======================= L3 Edition view (IA.04) =======================
+  // ======================= L3 Edition view =======================
   function buildEditionGraph(editionKey, playerName) {
     const p = data.players.find(x => x.name === playerName);
     if (!p) return null;
@@ -2951,7 +2753,7 @@
       });
     });
 
-    // v3: silver tier — ranks 11–30, third outer ring
+    // Silver tier — ranks 11–30, third outer ring
     const SILVER_RADIUS = 340;
     outerHolders.forEach((h, i) => {
       const angle = (i / Math.max(1, outerHolders.length)) * Math.PI * 2 + Math.PI / 3;
@@ -3051,7 +2853,7 @@
     document.getElementById('gm-whales').textContent = topLabel;
     document.getElementById('gm-serials').textContent = eg.stats.circulation.toLocaleString();
 
-    // v3: subtitle surfaces total unique holders + how many are visible in the ring
+    // Subtitle surfaces total unique holders + how many are visible in the ring
     const setLbl = (eg.edition.set?.flowName || 'Edition').toUpperCase();
     const tierLbl = tierLabel(eg.edition.tier).toUpperCase();
     const circ = (eg.edition.edition?.circulationCount || 0).toLocaleString();
@@ -3074,451 +2876,8 @@
     }, 50);
   }
 
-  // ======================= L0 League view (IA.02) =======================
-  // 30 NBA teams with NBA.com team IDs + primary/secondary colors + conference/division.
-  // nbaId values are public and stable (Stats.NBA.com). logoUrl uses cdn.nba.com/logos/nba pattern.
-  const NBA_TEAMS_REGISTRY = [
-    // Eastern Conference — Atlantic
-    { slug:'celtics',      name:'Boston Celtics',          abbr:'BOS', city:'Boston',       nbaId:'1610612738', conf:'E', div:'Atlantic', colorPrimary:'#007A33', colorSecondary:'#BA9653' },
-    { slug:'nets',         name:'Brooklyn Nets',           abbr:'BKN', city:'Brooklyn',     nbaId:'1610612751', conf:'E', div:'Atlantic', colorPrimary:'#000000', colorSecondary:'#FFFFFF' },
-    { slug:'knicks',       name:'New York Knicks',         abbr:'NYK', city:'New York',     nbaId:'1610612752', conf:'E', div:'Atlantic', colorPrimary:'#006BB6', colorSecondary:'#F58426' },
-    { slug:'sixers',       name:'Philadelphia 76ers',      abbr:'PHI', city:'Philadelphia', nbaId:'1610612755', conf:'E', div:'Atlantic', colorPrimary:'#006BB6', colorSecondary:'#ED174C' },
-    { slug:'raptors',      name:'Toronto Raptors',         abbr:'TOR', city:'Toronto',      nbaId:'1610612761', conf:'E', div:'Atlantic', colorPrimary:'#CE1141', colorSecondary:'#000000' },
-    // Eastern — Central
-    { slug:'bulls',        name:'Chicago Bulls',           abbr:'CHI', city:'Chicago',      nbaId:'1610612741', conf:'E', div:'Central',  colorPrimary:'#CE1141', colorSecondary:'#000000' },
-    { slug:'cavaliers',    name:'Cleveland Cavaliers',     abbr:'CLE', city:'Cleveland',    nbaId:'1610612739', conf:'E', div:'Central',  colorPrimary:'#860038', colorSecondary:'#FDBB30' },
-    { slug:'pistons',      name:'Detroit Pistons',         abbr:'DET', city:'Detroit',      nbaId:'1610612765', conf:'E', div:'Central',  colorPrimary:'#C8102E', colorSecondary:'#1D42BA' },
-    { slug:'pacers',       name:'Indiana Pacers',          abbr:'IND', city:'Indiana',      nbaId:'1610612754', conf:'E', div:'Central',  colorPrimary:'#002D62', colorSecondary:'#FDBB30' },
-    { slug:'bucks',        name:'Milwaukee Bucks',         abbr:'MIL', city:'Milwaukee',    nbaId:'1610612749', conf:'E', div:'Central',  colorPrimary:'#00471B', colorSecondary:'#EEE1C6' },
-    // Eastern — Southeast
-    { slug:'hawks',        name:'Atlanta Hawks',           abbr:'ATL', city:'Atlanta',      nbaId:'1610612737', conf:'E', div:'Southeast',colorPrimary:'#E03A3E', colorSecondary:'#C1D32F' },
-    { slug:'hornets',      name:'Charlotte Hornets',       abbr:'CHA', city:'Charlotte',    nbaId:'1610612766', conf:'E', div:'Southeast',colorPrimary:'#1D1160', colorSecondary:'#00788C' },
-    { slug:'heat',         name:'Miami Heat',              abbr:'MIA', city:'Miami',        nbaId:'1610612748', conf:'E', div:'Southeast',colorPrimary:'#98002E', colorSecondary:'#F9A01B' },
-    { slug:'magic',        name:'Orlando Magic',           abbr:'ORL', city:'Orlando',      nbaId:'1610612753', conf:'E', div:'Southeast',colorPrimary:'#0077C0', colorSecondary:'#C4CED4' },
-    { slug:'wizards',      name:'Washington Wizards',      abbr:'WAS', city:'Washington',   nbaId:'1610612764', conf:'E', div:'Southeast',colorPrimary:'#002B5C', colorSecondary:'#E31837' },
-    // Western — Northwest
-    { slug:'nuggets',      name:'Denver Nuggets',          abbr:'DEN', city:'Denver',       nbaId:'1610612743', conf:'W', div:'Northwest',colorPrimary:'#0E2240', colorSecondary:'#FEC524' },
-    { slug:'timberwolves', name:'Minnesota Timberwolves',  abbr:'MIN', city:'Minnesota',    nbaId:'1610612750', conf:'W', div:'Northwest',colorPrimary:'#0C2340', colorSecondary:'#236192' },
-    { slug:'thunder',      name:'Oklahoma City Thunder',   abbr:'OKC', city:'Oklahoma City',nbaId:'1610612760', conf:'W', div:'Northwest',colorPrimary:'#007AC1', colorSecondary:'#EF3B24' },
-    { slug:'blazers',      name:'Portland Trail Blazers',  abbr:'POR', city:'Portland',     nbaId:'1610612757', conf:'W', div:'Northwest',colorPrimary:'#E03A3E', colorSecondary:'#000000' },
-    { slug:'jazz',         name:'Utah Jazz',               abbr:'UTA', city:'Utah',         nbaId:'1610612762', conf:'W', div:'Northwest',colorPrimary:'#002B5C', colorSecondary:'#F9A01B' },
-    // Western — Pacific
-    { slug:'warriors',     name:'Golden State Warriors',   abbr:'GSW', city:'Golden State', nbaId:'1610612744', conf:'W', div:'Pacific',  colorPrimary:'#1D428A', colorSecondary:'#FFC72C' },
-    { slug:'clippers',     name:'LA Clippers',             abbr:'LAC', city:'Los Angeles',  nbaId:'1610612746', conf:'W', div:'Pacific',  colorPrimary:'#C8102E', colorSecondary:'#1D428A' },
-    { slug:'lakers',       name:'Los Angeles Lakers',      abbr:'LAL', city:'Los Angeles',  nbaId:'1610612747', conf:'W', div:'Pacific',  colorPrimary:'#552583', colorSecondary:'#FDB927' },
-    { slug:'suns',         name:'Phoenix Suns',            abbr:'PHX', city:'Phoenix',      nbaId:'1610612756', conf:'W', div:'Pacific',  colorPrimary:'#1D1160', colorSecondary:'#E56020' },
-    { slug:'kings',        name:'Sacramento Kings',        abbr:'SAC', city:'Sacramento',   nbaId:'1610612758', conf:'W', div:'Pacific',  colorPrimary:'#5A2D81', colorSecondary:'#63727A' },
-    // Western — Southwest
-    { slug:'mavericks',    name:'Dallas Mavericks',        abbr:'DAL', city:'Dallas',       nbaId:'1610612742', conf:'W', div:'Southwest',colorPrimary:'#00538C', colorSecondary:'#002B5E' },
-    { slug:'rockets',      name:'Houston Rockets',         abbr:'HOU', city:'Houston',      nbaId:'1610612745', conf:'W', div:'Southwest',colorPrimary:'#CE1141', colorSecondary:'#000000' },
-    { slug:'grizzlies',    name:'Memphis Grizzlies',       abbr:'MEM', city:'Memphis',      nbaId:'1610612763', conf:'W', div:'Southwest',colorPrimary:'#5D76A9', colorSecondary:'#12173F' },
-    { slug:'pelicans',     name:'New Orleans Pelicans',    abbr:'NOP', city:'New Orleans',  nbaId:'1610612740', conf:'W', div:'Southwest',colorPrimary:'#0C2340', colorSecondary:'#C8102E' },
-    { slug:'spurs',        name:'San Antonio Spurs',       abbr:'SAS', city:'San Antonio',  nbaId:'1610612759', conf:'W', div:'Southwest',colorPrimary:'#C4CED4', colorSecondary:'#000000' },
-  ];
-  NBA_TEAMS_REGISTRY.forEach(t => { t.logoUrl = `https://cdn.nba.com/logos/nba/${t.nbaId}/primary/L/logo.svg`; });
 
-  function teamBySlug(slug) { return NBA_TEAMS_REGISTRY.find(t => t.slug === slug); }
-
-  // Compose a team-logo sprite as a team-color disc with the abbreviation as the logo glyph.
-  // NOTE: the NBA CDN (cdn.nba.com) does NOT send CORS headers, so fetching real SVGs into a
-  // tainted-canvas would fail anyway. We render a cohesive typographic abbreviation badge instead —
-  // large white abbreviation on a team-primary disc with a secondary-color ring. Zero network calls.
-  function composeTeamLogoSprite(url, primary, secondary, abbr, renderSize) {
-    const S = 256;
-    const canvas = document.createElement('canvas');
-    canvas.width = S; canvas.height = S;
-    const ctx = canvas.getContext('2d');
-    // Primary-colored disc
-    ctx.fillStyle = primary;
-    ctx.beginPath(); ctx.arc(S/2, S/2, S/2 - 4, 0, Math.PI*2); ctx.fill();
-    // Secondary-color ring
-    ctx.strokeStyle = secondary || '#ffffff'; ctx.lineWidth = 10;
-    ctx.beginPath(); ctx.arc(S/2, S/2, S/2 - 10, 0, Math.PI*2); ctx.stroke();
-    // Abbreviation glyph
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 92px "Sofia Sans Extra Condensed", system-ui, sans-serif';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    // Slight drop-shadow so white-on-white (e.g. BKN black disc with white ring) still reads
-    ctx.shadowColor = 'rgba(0,0,0,0.6)';
-    ctx.shadowBlur = 6;
-    ctx.fillText(abbr, S/2, S/2 + 4);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(renderSize, renderSize, 1);
-    return Promise.resolve(sprite);
-  }
-
-  // Build the L0 graph: league-center + 30 team-logo nodes (West left / East right hemispheres) + whale-hint outer ring.
-  function buildLeagueGraph() {
-    const nodes = [];
-    const links = [];
-    const R = 110; // team ring radius
-    // West on the left (angles π/2 .. 3π/2), East on the right (angles -π/2 .. π/2).
-    // Within each hemisphere, group by division and sort within.
-    const west = NBA_TEAMS_REGISTRY.filter(t => t.conf === 'W');
-    const east = NBA_TEAMS_REGISTRY.filter(t => t.conf === 'E');
-    // Sort for stable display
-    const divOrderW = ['Northwest','Pacific','Southwest'];
-    const divOrderE = ['Atlantic','Central','Southeast'];
-    west.sort((a,b) => divOrderW.indexOf(a.div)-divOrderW.indexOf(b.div) || a.city.localeCompare(b.city));
-    east.sort((a,b) => divOrderE.indexOf(a.div)-divOrderE.indexOf(b.div) || a.city.localeCompare(b.city));
-    // West: π/2 (top) sweeping clockwise to 3π/2 (bottom) on the left hemisphere
-    west.forEach((t, i) => {
-      const frac = (i + 0.5) / west.length;
-      const angle = Math.PI * 0.5 + frac * Math.PI; // π/2 → 3π/2
-      nodes.push({
-        id: 'team:' + t.slug,
-        type: 'team-logo',
-        slug: t.slug, name: t.name, abbr: t.abbr, city: t.city,
-        conf: t.conf === 'W' ? 'Western' : 'Eastern', div: t.div,
-        colorPrimary: t.colorPrimary, colorSecondary: t.colorSecondary,
-        logoUrl: t.logoUrl,
-        val: 6,
-        fx: Math.cos(angle) * R, fy: Math.sin(angle) * 8, fz: Math.sin(angle) * R
-      });
-    });
-    // East: -π/2 (top) sweeping clockwise to π/2 (bottom) on the right hemisphere
-    east.forEach((t, i) => {
-      const frac = (i + 0.5) / east.length;
-      const angle = -Math.PI * 0.5 + frac * Math.PI; // -π/2 → π/2
-      nodes.push({
-        id: 'team:' + t.slug,
-        type: 'team-logo',
-        slug: t.slug, name: t.name, abbr: t.abbr, city: t.city,
-        conf: 'Eastern', div: t.div,
-        colorPrimary: t.colorPrimary, colorSecondary: t.colorSecondary,
-        logoUrl: t.logoUrl,
-        val: 6,
-        fx: Math.cos(angle) * R, fy: Math.sin(angle) * 8, fz: Math.sin(angle) * R
-      });
-    });
-    // League center
-    nodes.push({
-      id: 'league:nba',
-      type: 'league-center',
-      val: 14,
-      fx: 0, fy: 0, fz: 0
-    });
-    // Outer whale-hint ring: ~360 gold dust particles in a thin annulus radius 170..190
-    const HINT_COUNT = 360;
-    const HINT_R_INNER = 170;
-    const HINT_R_OUTER = 195;
-    for (let i = 0; i < HINT_COUNT; i++) {
-      const angle = (i / HINT_COUNT) * Math.PI * 2 + (Math.random() * 0.02);
-      const r = HINT_R_INNER + Math.random() * (HINT_R_OUTER - HINT_R_INNER);
-      nodes.push({
-        id: 'whale-hint:' + i,
-        type: 'whale-hint',
-        val: 0.2,
-        fx: Math.cos(angle) * r,
-        fy: (Math.random() - 0.5) * 8,
-        fz: Math.sin(angle) * r
-      });
-    }
-    return { nodes, links };
-  }
-
-  // T1.08 — Typewriter-reveal narrative subtitle. Level-aware context chip that types in left-to-right,
-  // holds at full opacity, then eases to 55% to keep the reference visible but unobtrusive.
-  let _subtitleTypeTimer = null;
-  let _subtitleHoldTimer = null;
-  function typeLevelSubtitle(text, opts) {
-    const el = document.getElementById('level-subtitle');
-    if (!el) return;
-    // Cancel any in-flight type/hold so fast level-switches don't collide.
-    if (_subtitleTypeTimer) { clearInterval(_subtitleTypeTimer); _subtitleTypeTimer = null; }
-    if (_subtitleHoldTimer) { clearTimeout(_subtitleHoldTimer); _subtitleHoldTimer = null; }
-    el.classList.remove('typing');
-    el.style.transition = '';
-    el.style.opacity = '1';
-    if (!text) { el.style.display = 'none'; el.textContent = ''; return; }
-    const o = opts || {};
-    const speed = o.speed || 32;                // chars/sec
-    const holdMs = typeof o.holdMs === 'number' ? o.holdMs : 4000;
-    const adjustedSpeed = text.length > 80 ? Math.max(speed, 40) : speed;
-    const charMs = 1000 / adjustedSpeed;
-    el.textContent = '';
-    el.style.display = 'block';
-    el.classList.add('typing');
-    let i = 0;
-    _subtitleTypeTimer = setInterval(() => {
-      el.textContent = text.slice(0, ++i);
-      if (i >= text.length) {
-        clearInterval(_subtitleTypeTimer);
-        _subtitleTypeTimer = null;
-        el.classList.remove('typing');
-        _subtitleHoldTimer = setTimeout(() => {
-          el.style.transition = 'opacity 0.6s ease';
-          el.style.opacity = '0.55';
-          _subtitleHoldTimer = null;
-        }, holdMs);
-      }
-    }, charMs);
-  }
-  // Back-compat wrapper — all existing setLevelSubtitle(...) call sites continue to work.
-  function setLevelSubtitle(text) {
-    typeLevelSubtitle(text);
-  }
-
-  // Activate L0 League view.
-  function showLeagueView() {
-    // UI chrome
-    document.getElementById('graph-empty').style.display = 'none';
-    document.getElementById('graph-legend').style.display = 'none';
-    document.getElementById('graph-meta').style.display = 'block';
-    document.getElementById('graph-controls').style.display = 'flex';
-    document.getElementById('graph-hint').style.display = 'block';
-    const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'none';
-    drawer.classList.remove('open');
-    document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
-
-    // Meta box content
-    const totalMoments = data.players.reduce((a, p) => a + (p.totalMintedMomentCount || 0), 0);
-    document.getElementById('gm-player').textContent = 'NBA';
-    document.getElementById('gm-moments').textContent = '30 teams';
-    document.getElementById('gm-collectors').textContent = data.players.length.toLocaleString() + ' surfaced';
-    document.getElementById('gm-whales').textContent = 'League overview';
-    document.getElementById('gm-serials').textContent = totalMoments.toLocaleString();
-    document.getElementById('graph-hint').textContent = 'Click a team · drag to orbit';
-
-    // Subtitle — context line per Beshai reference
-    setLevelSubtitle(`30 teams · ${data.players.length} players surfaced · ${totalMoments.toLocaleString()} Moments indexed`);
-
-    currentPlayer = null;
-    const lg = buildLeagueGraph();
-    currentData = Object.assign({}, lg, { ownerArr: [], editionNodes: new Map() });
-
-    const g = ensureGraph();
-    g.graphData({ nodes: lg.nodes, links: lg.links });
-
-    // Cinematic pull-back so all 30 teams fit in frame (iter-4 wider pose)
-    setTimeout(() => {
-      g.cameraPosition({ x: 0, y: 100, z: 460 }, { x: 0, y: 0, z: 0 }, 1400);
-    }, 50);
-  }
-
-  // Build the L1 team graph: team-logo center + iconic editions inner ring + roster player portraits middle ring + top team-wide collectors outer ring.
-  function buildTeamGraph(slug) {
-    const t = teamBySlug(slug);
-    if (!t) return null;
-    const nodes = [];
-    const links = [];
-
-    // Find roster players surfaced in our data for this team. Match by either exact team name or teamSlug.
-    const rosterPlayers = data.players.filter(p =>
-      p.team === t.name || p.teamSlug === t.slug
-    );
-
-    // Team center — NOTE: id suffix :center so the click handler knows to go back to L0 (not recurse into L1)
-    const centerId = 'team:' + t.slug + ':center';
-    nodes.push({
-      id: centerId,
-      type: 'team-logo',
-      slug: t.slug, name: t.name, abbr: t.abbr, city: t.city,
-      conf: t.conf === 'W' ? 'Western' : 'Eastern', div: t.div,
-      colorPrimary: t.colorPrimary, colorSecondary: t.colorSecondary,
-      logoUrl: t.logoUrl,
-      val: 22,
-      fx: 0, fy: 0, fz: 0
-    });
-
-    // Empty-team fallback: just the center. No rings.
-    if (rosterPlayers.length === 0) {
-      return {
-        team: t, rosterPlayers, teamEditions: [], teamCollectors: [],
-        nodes, links, empty: true
-      };
-    }
-
-    // Roster inner ring — primary drill-in target, close to the team logo
-    const ROSTER_R = 140;
-    rosterPlayers.forEach((p, i) => {
-      const angle = (i / rosterPlayers.length) * Math.PI * 2 - Math.PI / 2;
-      nodes.push({
-        id: 'roster:' + t.slug + ':' + p.playerId,
-        type: 'roster-player',
-        name: p.name,
-        playerName: p.name,
-        team: p.team,
-        teamColorPrimary: t.colorPrimary,
-        teamColorSecondary: t.colorSecondary,
-        editions: p.editions.length,
-        ownersCount: p.owners.length,
-        totalMoments: p.totalMintedMomentCount || 0,
-        val: 19,
-        fx: Math.cos(angle) * ROSTER_R,
-        fy: Math.sin(angle * 2) * 12,
-        fz: Math.sin(angle) * ROSTER_R
-      });
-      links.push({
-        source: 'roster:' + t.slug + ':' + p.playerId,
-        target: centerId,
-        kind: 'team-roster',
-        strokeColor: 'rgba(' + hexToRgbTriplet(t.colorSecondary || t.colorPrimary) + ',0.55)',
-        particleColor: t.colorSecondary || t.colorPrimary,
-        value: 0.6
-      });
-    });
-
-    // Iconic editions inner ring — rank by tier weight then rarer-first
-    const allEditions = [];
-    for (const p of rosterPlayers) {
-      for (const e of p.editions) {
-        allEditions.push({ e, p });
-      }
-    }
-    const tierPriority = { ULTIMATE: 5, LEGENDARY: 4, ANTHOLOGY: 3, RARE: 2, FANDOM: 1, COMMON: 0 };
-    function tierPri(tier) {
-      if (!tier) return 0;
-      for (const k of Object.keys(tierPriority)) if (tier.includes(k)) return tierPriority[k];
-      return 0;
-    }
-    allEditions.sort((a, b) => {
-      const tb = tierPri(b.e.tier) - tierPri(a.e.tier);
-      if (tb !== 0) return tb;
-      return (a.e.edition?.circulationCount || 99999) - (b.e.edition?.circulationCount || 99999);
-    });
-    const teamEditions = allEditions.slice(0, 5);
-    // Editions middle ring — outside roster, inside collectors. Breathing room from the team logo.
-    const EDITION_R = 250;
-    teamEditions.forEach((ep, i) => {
-      const angle = (i / Math.max(1, teamEditions.length)) * Math.PI * 2 + Math.PI / 6;
-      const mediaFlowId = ep.e.serialsSampled[0]?.flowId;
-      const heroUrl = mediaFlowId ? mediaUrl(mediaFlowId, 'hero', { width: 180, format: 'webp', quality: 80 }) : null;
-      const eid = 'team-edition:' + t.slug + ':' + ep.e.editionKey;
-      nodes.push({
-        id: eid,
-        type: 'team-edition',
-        editionKey: ep.e.editionKey,
-        playerName: ep.p.name,
-        setName: ep.e.set?.flowName || 'Moment',
-        tier: ep.e.tier,
-        circulation: ep.e.edition?.circulationCount || 0,
-        heroUrl,
-        val: 6,
-        fx: Math.cos(angle) * EDITION_R,
-        fy: Math.sin(angle * 2) * 6,
-        fz: Math.sin(angle) * EDITION_R
-      });
-      links.push({
-        source: eid,
-        target: centerId,
-        kind: 'team-edition-link',
-        strokeColor: 'rgba(' + hexToRgbTriplet(tierColor(ep.e.tier)) + ',0.55)',
-        particleColor: tierColor(ep.e.tier),
-        value: 0.4
-      });
-    });
-
-    // Team-wide top collectors outer ring — aggregate all owners across rostered players, collapse by flowAddress, sum holdings.
-    const teamOwnerMap = new Map();
-    for (const p of rosterPlayers) {
-      for (const o of p.owners) {
-        if (!o.flowAddress) continue;
-        const existing = teamOwnerMap.get(o.flowAddress);
-        if (!existing) {
-          teamOwnerMap.set(o.flowAddress, { ...o, teamHoldings: o.holdings, playersOnTeam: new Set([p.name]) });
-        } else {
-          existing.teamHoldings += o.holdings;
-          existing.playersOnTeam.add(p.name);
-          if (o.username && !existing.username) existing.username = o.username;
-          if (o.profileImageUrl && !existing.profileImageUrl) existing.profileImageUrl = o.profileImageUrl;
-        }
-      }
-    }
-    const teamCollectors = [...teamOwnerMap.values()]
-      .sort((a, b) => b.teamHoldings - a.teamHoldings)
-      .slice(0, 10);
-    const COLLECTOR_R = 360;
-    teamCollectors.forEach((o, i) => {
-      const angle = (i / Math.max(1, teamCollectors.length)) * Math.PI * 2;
-      nodes.push({
-        id: 'team-collector:' + t.slug + ':' + o.flowAddress,
-        type: 'team-collector',
-        name: o.username || shortAddr(o.flowAddress),
-        username: o.username,
-        flowAddress: o.flowAddress,
-        dapperID: o.dapperID,
-        profileImageUrl: o.profileImageUrl,
-        teamRank: i + 1,
-        teamHoldings: o.teamHoldings,
-        playersOnTeamCount: o.playersOnTeam.size,
-        // Shape these fields so openCollectorDrawer can receive it (the drawer expects collector-node shape)
-        globalRank: i + 1, // scoped rank within team; drawer displays "rank" — we pass the team rank
-        fullHoldings: o.teamHoldings,
-        isWhale: true,
-        tier: 'gold',
-        pctLabel: `${o.playersOnTeam.size} of ${rosterPlayers.length} roster`,
-        crossPlayerFan: o.playersOnTeam.size > 1,
-        crossPlayerCount: o.playersOnTeam.size,
-        color: '#f5b840',
-        val: 5,
-        fx: Math.cos(angle) * COLLECTOR_R,
-        fy: Math.sin(angle * 3) * 10,
-        fz: Math.sin(angle) * COLLECTOR_R
-      });
-    });
-
-    return { team: t, rosterPlayers, teamEditions, teamCollectors, nodes, links, empty: false };
-  }
-
-  // Activate L1 Team view — full roster + editions + collectors. Falls back to honest shell for sparse teams.
-  function showTeamView(slug) {
-    const t = teamBySlug(slug);
-    if (!t) { console.warn('[team] unknown slug', slug); window.fandomRouter.go('league', {}, { replace: true }); return; }
-
-    document.getElementById('graph-empty').style.display = 'none';
-    document.getElementById('graph-legend').style.display = 'none';
-    document.getElementById('graph-meta').style.display = 'block';
-    document.getElementById('graph-controls').style.display = 'flex';
-    document.getElementById('graph-hint').style.display = 'block';
-    const lb = document.getElementById('leaderboard'); if (lb) lb.style.display = 'none';
-    drawer.classList.remove('open');
-    document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
-
-    const tg = buildTeamGraph(slug);
-
-    // Meta box
-    document.getElementById('gm-player').textContent = t.name;
-    document.getElementById('gm-moments').textContent = t.conf === 'W' ? 'Western' : 'Eastern';
-    document.getElementById('gm-collectors').textContent = t.div;
-    document.getElementById('graph-hint').textContent = 'Click a roster player · Esc returns to league';
-
-    if (tg.empty) {
-      document.getElementById('gm-whales').textContent = '—';
-      document.getElementById('gm-serials').textContent = 'No data yet';
-      setLevelSubtitle(`${t.name.toUpperCase()} · ${t.div.toUpperCase()} DIVISION · ${(t.conf === 'W' ? 'WESTERN' : 'EASTERN')} CONFERENCE — NO PLAYERS IN CURRENT DATA SLICE`);
-    } else {
-      document.getElementById('gm-whales').textContent = tg.teamCollectors.length ? (tg.teamCollectors[0].username || shortAddr(tg.teamCollectors[0].flowAddress)) : '—';
-      // Clamp outlier per-player totals (e.g. Maxey API quirk returning ~176K) so team totals read sanely.
-      const SANITY_CAP = 50000;
-      const totalTeamMoments = tg.rosterPlayers.reduce((a, p) => a + Math.min(p.totalMintedMomentCount || 0, SANITY_CAP), 0);
-      document.getElementById('gm-serials').textContent = totalTeamMoments.toLocaleString();
-      const uniqueCollectors = new Set();
-      for (const p of tg.rosterPlayers) for (const o of p.owners) if (o.flowAddress) uniqueCollectors.add(o.flowAddress);
-      const rosterWord = tg.rosterPlayers.length === 1 ? 'PLAYER' : 'PLAYERS';
-      setLevelSubtitle(`${t.name.toUpperCase()} · ${tg.rosterPlayers.length} ${rosterWord} SURFACED · ${tg.teamEditions.length} ICONIC EDITIONS · ${uniqueCollectors.size.toLocaleString()} COLLECTORS`);
-    }
-
-    currentPlayer = null;
-    currentData = Object.assign({ ownerArr: [], editionNodes: new Map() }, { nodes: tg.nodes, links: tg.links });
-
-    const g = ensureGraph();
-    g.graphData({ nodes: tg.nodes, links: tg.links });
-
-    setTimeout(() => {
-      if (tg.empty) {
-        g.cameraPosition({ x: 0, y: 60, z: 160 }, { x: 0, y: 0, z: 0 }, 1400);
-      } else {
-        // Camera pulled back to frame the expanded collector ring at radius 360
-        g.cameraPosition({ x: 0, y: 180, z: 560 }, { x: 0, y: 0, z: 0 }, 1400);
-      }
-    }, 50);
-  }
-
-  // ======================= IA.05 — L4 Collector-Universe view =======================
+  // ======================= L4 Collector-Universe view =======================
   // Normalize a Flow address param (strip 0x prefix, lowercase, defensive trim).
   function normalizeFlowAddr(a) { return (a || '').replace(/^0x/i, '').toLowerCase().trim(); }
 
@@ -3643,7 +3002,7 @@
       });
     });
 
-    // Outer annulus hint — faint gold particles (IA.07 partial closure)
+    // Outer annulus hint — faint gold particles
     const HINT_COUNT = 180;
     const HINT_R_INNER = 200;
     const HINT_R_OUTER = 240;
@@ -3891,28 +3250,14 @@
       if (payload.spotlight) setTimeout(() => activateSpotlight(payload.spotlight), 1500);
     },
     buildCrumbs: (payload) => ([
-      { label: 'NBA', level: 'league', payload: {} },
+      { label: 'Top Shot', level: 'picker', payload: {} },
       { label: payload.player, level: 'player', payload: { player: payload.player } }
     ])
-  });
-  window.fandomRouter.register('league', {
-    render: () => showLeagueView(),
-    buildCrumbs: () => ([{ label: 'NBA', level: 'league', payload: {} }])
-  });
-  window.fandomRouter.register('team', {
-    render: (payload) => showTeamView(payload.team),
-    buildCrumbs: (payload) => {
-      const t = teamBySlug(payload.team);
-      return [
-        { label: 'NBA', level: 'league', payload: {} },
-        { label: t ? t.name : payload.team, level: 'team', payload: { team: payload.team } }
-      ];
-    }
   });
   window.fandomRouter.register('collector', {
     render: (payload) => showCollectorView(payload.addr),
     buildCrumbs: (payload) => ([
-      { label: 'NBA', level: 'league', payload: {} },
+      { label: 'Top Shot', level: 'picker', payload: {} },
       { label: 'Collector', level: 'collector', payload }
     ])
   });
@@ -3925,14 +3270,14 @@
       const p = data.players.find(x => x.name === payload.player);
       const e = p?.editions.find(ed => ed.editionKey === payload.key);
       return [
-        { label: 'NBA', level: 'league', payload: {} },
+        { label: 'Top Shot', level: 'picker', payload: {} },
         { label: payload.player || '—', level: 'player', payload: { player: payload.player } },
         { label: (e?.set?.flowName || 'Edition') + ' · ' + tierLabel(e?.tier), level: 'edition', payload }
       ];
     }
   });
 
-  // ======================= Cinematic level transition (IA.06) =======================
+  // ======================= Cinematic level transition =======================
   function cinematicTransition(fromState, toState) {
     return new Promise((resolve) => {
       const overlay = document.getElementById('level-transition-overlay');
@@ -3959,8 +3304,7 @@
       card.classList.add('active');
     }
   }
-  // V3: only deep-link to a player/edition. With no URL param, stay on the picker —
-  // do NOT render league / team views on boot. The lander is the picker, full stop.
+  // Only deep-link to a player/edition. With no URL param, stay on the picker.
   if ((initial.level === 'player' || initial.level === 'edition') && initial.payload && initial.payload.player) {
     loadAndRoutePlayer(initial.payload.player, initial.payload.spotlight || null).then(() => {
       if (initial.level === 'edition') {
@@ -3970,3 +3314,4 @@
   }
   // else: no auto-route. Picker is visible, graph-area hidden by CSS until first click.
 })();
+
