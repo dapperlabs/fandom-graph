@@ -1,67 +1,70 @@
-// data-layer.js — metadata registry + per-player lazy loader
-const PLAYERS = [
-  { playerId: '2544', name: "LeBron James", team: "Los Angeles Lakers", teamSlug: "lakers", teamColors: ['#552583','#FDB927'] },
-  { playerId: '201939', name: "Stephen Curry", team: "Golden State Warriors", teamSlug: "warriors", teamColors: ['#1D428A','#FFC72C'] },
-  { playerId: '1629029', name: "Luka Dončić", team: "Dallas Mavericks", teamSlug: "mavericks", teamColors: ['#00538C','#002B5E'] },
-  { playerId: '203507', name: "Giannis Antetokounmpo", team: "Milwaukee Bucks", teamSlug: "bucks", teamColors: ['#00471B','#EEE1C6'] },
-  { playerId: '201142', name: "Kevin Durant", team: "Phoenix Suns", teamSlug: "suns", teamColors: ['#1D1160','#E56020'] },
-  { playerId: '203999', name: "Nikola Jokić", team: "Denver Nuggets", teamSlug: "nuggets", teamColors: ['#0E2240','#FEC524'] },
-  { playerId: '203954', name: "Joel Embiid", team: "Philadelphia 76ers", teamSlug: "sixers", teamColors: ['#006BB6','#ED174C'] },
-  { playerId: '1628369', name: "Jayson Tatum", team: "Boston Celtics", teamSlug: "celtics", teamColors: ['#007A33','#BA9653'] },
-  { playerId: '1628384', name: "Devin Booker", team: "Phoenix Suns", teamSlug: "suns", teamColors: ['#1D1160','#E56020'] },
-  { playerId: '1629630', name: "Ja Morant", team: "Memphis Grizzlies", teamSlug: "grizzlies", teamColors: ['#5D76A9','#12173F'] },
-  { playerId: '1630162', name: "Anthony Edwards", team: "Minnesota Timberwolves", teamSlug: "timberwolves", teamColors: ['#0C2340','#236192'] },
-  { playerId: '1641705', name: "Victor Wembanyama", team: "San Antonio Spurs", teamSlug: "spurs", teamColors: ['#C4CED4','#000000'] },
-  { playerId: '1628983', name: "Shai Gilgeous-Alexander", team: "Oklahoma City Thunder", teamSlug: "thunder", teamColors: ['#007AC1','#EF3B24'] },
-  { playerId: '1628973', name: "Jalen Brunson", team: "Dallas Mavericks", teamSlug: "mavericks", teamColors: ['#00538C','#002B5E'] },
-  { playerId: '1626157', name: "Karl-Anthony Towns", team: "Minnesota Timberwolves", teamSlug: "timberwolves", teamColors: ['#0C2340','#236192'] }
-];
+// data-layer.js — player catalog + per-player lazy loader
+//
+// The picker uses index.json (100 entries, 19KB) as the single source of truth
+// for player metadata. Per-player {id}.json files (~2-5MB each) are fetched
+// on-demand from the SPEC-002 CDN.
+//
+// In production, DATA_ORIGIN points to the CDN (fandom-v3.vercel.app) where
+// the full 100-player dataset lives. In local dev, it falls back to /data/
+// where sample files exist for 3 players.
 
-// Live metadata (enriched from index.json async)
-let PLAYERS_META = [...PLAYERS];
+const DATA_ORIGIN = 'https://fandom-v3.vercel.app';
+
+let PLAYERS_META = [];
 let indexLoaded = false;
-
-// Cache of loaded per-player data
 const _cache = new Map();
 
 const DataLayer = {
-  // PLAYERS exposed as getter so window.DataLayer.PLAYERS works (fandom.js reads this)
   get PLAYERS() { return PLAYERS_META; },
   set PLAYERS(v) { PLAYERS_META = v; },
 
   getMeta() { return PLAYERS_META; },
 
-  // Load and cache per-player full data from /data/{playerId}.json
+  // Load and cache per-player full data.
+  // Tries the CDN first; falls back to /data/ for local dev (sample files).
   async loadPlayer(playerId) {
     const id = String(playerId);
     if (_cache.has(id)) return _cache.get(id);
-    const res = await fetch(`/data/${id}.json`);
-    if (!res.ok) throw new Error(`Player ${id} not found (HTTP ${res.status})`);
-    const data = await res.json();
+
+    // Try CDN first (production data for all 100 players)
+    try {
+      const res = await fetch(`${DATA_ORIGIN}/data/${id}.json`);
+      if (res.ok) {
+        const data = await res.json();
+        _cache.set(id, data);
+        return data;
+      }
+    } catch (e) {
+      // CDN fetch failed (network/CORS) — fall through to local
+    }
+
+    // Fallback: local /data/ (sample files in OSS, production files if present)
+    const localRes = await fetch(`/data/${id}.json`);
+    if (!localRes.ok) {
+      const err = new Error(`Player ${id} not found (HTTP ${localRes.status})`);
+      err.name = localRes.status === 404 ? 'NotFoundError' : 'NetworkError';
+      throw err;
+    }
+    const data = await localRes.json();
     _cache.set(id, data);
     return data;
   },
 
-  // Enrich PLAYERS_META from /data/index.json (called once at startup)
+  // Load index.json as the single source of player metadata.
+  // Called once at startup. The picker renders from this.
   async initIndex() {
     if (indexLoaded) return;
     try {
       const res = await fetch('/data/index.json');
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`index.json HTTP ${res.status}`);
       const index = await res.json();
-      const byId = new Map(index.map(p => [String(p.playerId), p]));
-      PLAYERS_META = PLAYERS_META.map(p => {
-        const live = byId.get(String(p.playerId));
-        return live ? { ...p, ...live } : p;
-      });
+      PLAYERS_META = index;
       indexLoaded = true;
     } catch(e) {
-      console.warn('DataLayer: index.json not available, using bundled metadata', e);
+      console.warn('DataLayer: index.json not available', e);
+      throw e;
     }
   }
 };
 
-// CRITICAL: expose to window so fandom.js (classic <script defer>) can reach it.
-// Module scope keeps `DataLayer` private otherwise, and fandom.js fails silently.
 window.DataLayer = DataLayer;
-DataLayer.initIndex().catch(() => {});
