@@ -24,7 +24,6 @@
   .picker-hdr { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 22px; flex-wrap: wrap; gap: 12px; }
   .picker-hdr h2 { font-family: var(--hdr); font-weight: 900; font-size: clamp(40px, 6vw, 72px); text-transform: uppercase; letter-spacing: -0.01em; line-height: 0.95; margin: 0; color: var(--fg); }
   .picker-hdr .sub { font-size: 13px; color: var(--fg-muted); font-family: var(--mono); }
-  .player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
 
   /* Hide picker when a player is loaded (body class toggled by fandom.js) */
   body.viewing-player .player-picker { display: none; }
@@ -37,16 +36,7 @@
   .back-to-picker .arrow { font-size: 16px; line-height: 1; }
   /* When the legend is visible, push it down so the back button stays clear */
   body.viewing-player .graph-legend { top: 70px; }
-  .player-card { position: relative; padding: 20px 18px; background: linear-gradient(145deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01)); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; text-align: left; transition: all 0.18s ease; color: inherit; text-decoration: none; overflow: hidden; font-family: inherit; }
-  .player-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, var(--player-c1, #5b6fff), var(--player-c2, #14d8c4)); opacity: 0.6; transition: opacity 0.2s ease; }
-  .player-card:hover { border-color: var(--border-strong); transform: translateY(-2px); background: linear-gradient(145deg, rgba(255,255,255,0.06), rgba(255,255,255,0.02)); }
-  .player-card:hover::before { opacity: 1; }
-  .player-card.active { border-color: var(--accent-teal); background: linear-gradient(145deg, rgba(20,216,196,0.08), rgba(52,81,255,0.04)); }
-  .player-card .initials { width: 40px; height: 40px; border-radius: 50%; background: linear-gradient(135deg, var(--player-c1, #5b6fff), var(--player-c2, #14d8c4)); display: flex; align-items: center; justify-content: center; font-family: var(--hdr); font-weight: 900; font-size: 16px; color: #fff; margin-bottom: 12px; }
-  .player-card .name { font-family: var(--hdr); font-weight: 800; font-size: 17px; text-transform: uppercase; letter-spacing: -0.005em; line-height: 1.05; margin-bottom: 4px; }
-  .player-card .team { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
-  .player-card .stats { display: flex; gap: 14px; font-size: 11px; color: var(--fg-muted); }
-  .player-card .stats strong { color: var(--fg); font-family: var(--mono); font-weight: 600; font-size: 12px; }
+  /* .player-card styles removed — picker now uses .player-result (spec-004) */
 
   .graph-area { position: relative; width: 100%; height: min(78vh, 820px); background: radial-gradient(ellipse at center, rgba(20,20,40,0.8) 0%, #05060c 80%); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); overflow: hidden; }
   .graph-area::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.6) 100%), repeating-linear-gradient(0deg, transparent 0 44px, rgba(20,216,196,0.03) 44px 45px), repeating-linear-gradient(90deg, transparent 0 44px, rgba(20,216,196,0.03) 44px 45px); pointer-events: none; z-index: 1; }
@@ -148,7 +138,15 @@
   <p class="picker-lede" style="max-width: 64ch; margin: -8px 0 24px; font-size: 15px; line-height: 1.55; color: rgba(240,242,253,0.65); font-weight: 300;">
     Every node is a real NBA Top Shot Moment. Every edge is a real wallet that owns one. Pick a player and explore the universe of every Moment they have, every serial ever minted, and every collector who owns a piece. <a href="/methodology" style="color: rgba(20,216,196,0.85); text-decoration: none; border-bottom: 1px solid rgba(20,216,196,0.3); padding-bottom: 1px;">How this works →</a>
   </p>
-  <div class="player-grid" id="player-grid"></div>
+  <div class="team-chips" id="team-chips" role="toolbar" aria-label="Filter by team"></div>
+  <div class="player-search">
+    <input type="search" id="player-search-input" role="combobox" aria-expanded="false" aria-controls="player-results" aria-autocomplete="list" aria-activedescendant="" placeholder="Search 100 NBA players..." inputmode="search" style="font-size:16px" />
+  </div>
+  <div class="player-results" id="player-results" role="listbox" aria-label="Players"></div>
+  <div class="picker-error" id="picker-error" style="display:none;">
+    <p>Couldn't load the player catalog — try again.</p>
+    <button id="picker-retry" type="button">Try again</button>
+  </div>
 </section>
 
 <section class="graph-area">

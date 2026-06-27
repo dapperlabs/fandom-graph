@@ -159,132 +159,257 @@
     return ownerPlayerMap.get(ownerKey(owner))?.size || 1;
   }
 
-  // ======================= Picker (metadata-only, searchable) =======================
-  // PLAYERS_META starts with the in-bundle DataLayer.PLAYERS (fast first-paint),
-  // then `/data/index.json` fetches + merges the full top-40 roster.
+  // ======================= Picker (searchable autocomplete, spec-004) =======================
+  // The picker reads the 100-player roster from window.DataLayer.PLAYERS after
+  // initIndex() resolves. Search + team chips + keyboard nav replace the flat grid.
   let PLAYERS_META = (window.DataLayer && window.DataLayer.PLAYERS) ? window.DataLayer.PLAYERS.slice() : [];
-  const grid = document.getElementById('player-grid');
-  const searchInput = document.getElementById('picker-search');
-  const searchClear = document.getElementById('picker-clear');
-  const pickerCount = document.getElementById('picker-count');
-  let currentFilter = '';
+  const searchInput = document.getElementById('player-search-input');
+  const resultsEl = document.getElementById('player-results');
+  const teamChipsEl = document.getElementById('team-chips');
+  const pickerErrorEl = document.getElementById('picker-error');
+  const pickerCountEl = document.getElementById('picker-count');
+  let allPlayers = [];      // full 100-player list from index.json
+  let filteredPlayers = []; // current filtered view
+  let activeTeams = new Set(); // active team filter chips (union)
+  let highlightIdx = -1;    // keyboard nav index
+  let selectionTime = 0;    // for Plausible picker_to_graph timing
 
-  function buildPlayerCard(p) {
-    const card = document.createElement('button');
-    card.className = 'player-card';
-    card.dataset.player = p.name;
-    card.dataset.playerId = p.playerId;
-    card.style.setProperty('--player-c1', p.teamColors[0]);
-    card.style.setProperty('--player-c2', p.teamColors[1]);
-    const initEl = document.createElement('div');
-    initEl.className = 'initials';
-    initEl.style.background = `linear-gradient(135deg, ${p.teamColors[0]}, ${p.teamColors[1]})`;
-    initEl.textContent = initials(p.name);
-    const nameEl = document.createElement('div'); nameEl.className = 'name'; nameEl.textContent = p.name;
-    const teamEl = document.createElement('div'); teamEl.className = 'team'; teamEl.textContent = p.team || '';
-    card.appendChild(initEl);
-    card.appendChild(nameEl);
-    card.appendChild(teamEl);
-    if (typeof p.totalMintedMomentCount === 'number' && p.totalMintedMomentCount > 0) {
-      const statsEl = document.createElement('div');
-      statsEl.className = 'stats';
-      const n = p.totalMintedMomentCount;
-      const fmt = n >= 1e6 ? (n/1e6).toFixed(2)+'M' : n >= 1e3 ? (n/1e3).toFixed(1)+'K' : String(n);
-      const m = document.createElement('span');
-      m.style.cssText = 'color:rgba(20,216,196,0.85); font-family:JetBrains Mono, SF Mono, monospace; font-size:12px; font-weight:600;';
-      m.textContent = fmt + ' Moments';
-      statsEl.appendChild(m);
-      card.appendChild(statsEl);
-    }
-    return card;
+  // Debounce helper
+  function debounce(fn, ms) {
+    let t;
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   }
 
-  // Flat grid, sorted by mint volume — 20 players don't need conference/team scaffolding.
-  function renderPickerGrid() {
-    while (grid.firstChild) grid.removeChild(grid.firstChild);
-    grid.style.cssText = 'display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px;';
-    const q = currentFilter.trim().toLowerCase();
-    const filtered = q
-      ? PLAYERS_META.filter(p =>
-          p.name.toLowerCase().includes(q) ||
-          p.team.toLowerCase().includes(q) ||
-          (p.teamSlug || '').toLowerCase().includes(q) ||
-          (p.teamAbbr || '').toLowerCase().includes(q))
-      : PLAYERS_META.slice();
-
-    if (filtered.length === 0) {
-      const empty = document.createElement('div');
-      empty.style.cssText = 'grid-column: 1/-1; text-align:center; padding:40px; color:rgba(240,242,253,0.45); font-size:13px;';
-      empty.textContent = `No players match "${currentFilter}"`;
-      grid.appendChild(empty);
-    } else {
-      for (const p of filtered) grid.appendChild(buildPlayerCard(p));
-    }
-
-    if (pickerCount) {
-      pickerCount.textContent = `${PLAYERS_META.length} players · click any to enter`;
-    }
+  // Short form: "Los Angeles Lakers" → "Lakers"
+  function shortTeam(team) {
+    return (team || '').replace('Los Angeles ', '').replace('Golden State ', '')
+      .replace('Oklahoma City ', '').replace('San Antonio ', '')
+      .replace('Minnesota ', '').replace('New Orleans ', '')
+      .replace('Memphis ', '').replace('Philadelphia ', '');
   }
 
-  // Wire search input
-  if (searchInput) {
-    searchInput.addEventListener('input', (e) => {
-      currentFilter = e.target.value;
-      renderPickerGrid();
+  // Render team filter chips (one per unique team, plus "All").
+  function renderTeamChips() {
+    const teams = [...new Set(allPlayers.map(p => p.team))].sort();
+    teamChipsEl.innerHTML = '';
+    // "All" chip — clears every team filter.
+    const allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'team-chip active';
+    allChip.textContent = 'All';
+    allChip.dataset.team = '';
+    allChip.setAttribute('aria-pressed', 'true');
+    allChip.addEventListener('click', () => {
+      activeTeams.clear();
+      updateChipStates();
+      filterAndRender();
     });
-    searchInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        // Load the first match
-        const first = grid.querySelector('.player-card');
-        if (first) first.click();
-      } else if (e.key === 'Escape') {
-        searchInput.value = '';
-        currentFilter = '';
-        renderPickerGrid();
+    teamChipsEl.appendChild(allChip);
+    for (const team of teams) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'team-chip';
+      const colors = (allPlayers.find(p => p.team === team) || {}).teamColors || ['#777', '#333'];
+      chip.innerHTML = `<span class="chip-dot" style="background:${colors[0]}"></span>${shortTeam(team)}`;
+      chip.dataset.team = team;
+      chip.setAttribute('aria-pressed', 'false');
+      chip.addEventListener('click', () => {
+        if (activeTeams.has(team)) activeTeams.delete(team);
+        else activeTeams.add(team);
+        updateChipStates();
+        filterAndRender();
+      });
+      teamChipsEl.appendChild(chip);
+    }
+  }
+
+  function updateChipStates() {
+    teamChipsEl.querySelectorAll('.team-chip').forEach(c => {
+      const isActive = c.dataset.team === '' ? activeTeams.size === 0 : activeTeams.has(c.dataset.team);
+      c.classList.toggle('active', isActive);
+      c.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+
+  // Filter players by search query + active team filters (union).
+  function filterPlayers(query) {
+    const q = (query || '').trim().toLowerCase();
+    let results = allPlayers;
+    if (activeTeams.size > 0) {
+      results = results.filter(p => activeTeams.has(p.team));
+    }
+    if (q) {
+      results = results.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        p.team.toLowerCase().includes(q));
+    }
+    // Sort by minted-moment count descending (empty query → popular first).
+    results = [...results].sort((a, b) => (b.totalMintedMomentCount || 0) - (a.totalMintedMomentCount || 0));
+    return results;
+  }
+
+  // Highlight matched substring (case-insensitive). Escapes nothing — index.json
+  // names/teams are trusted catalog strings, not user input.
+  function highlightMatch(text, query) {
+    if (!query) return text;
+    const idx = text.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return text;
+    return text.slice(0, idx) + '<strong class="match">' + text.slice(idx, idx + query.length) + '</strong>' + text.slice(idx + query.length);
+  }
+
+  function fmtCount(n) {
+    n = n || 0;
+    return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(n);
+  }
+
+  // Render results listbox.
+  function renderResults(players, query) {
+    resultsEl.innerHTML = '';
+    if (players.length === 0) {
+      resultsEl.innerHTML = '<div class="no-results" role="status" aria-live="polite">No players found</div>';
+      searchInput.setAttribute('aria-expanded', 'false');
+      searchInput.removeAttribute('aria-activedescendant');
+      highlightIdx = -1;
+      return;
+    }
+    searchInput.setAttribute('aria-expanded', 'true');
+    for (let i = 0; i < players.length; i++) {
+      const p = players[i];
+      const opt = document.createElement('div');
+      opt.className = 'player-result';
+      opt.setAttribute('role', 'option');
+      opt.setAttribute('aria-selected', 'false');
+      opt.id = 'player-result-' + i;
+      const colors = p.teamColors || ['#777', '#333'];
+      const teamShort = shortTeam(p.team);
+      const teamQ = query && teamShort.toLowerCase().includes(query.toLowerCase()) ? query : '';
+      opt.innerHTML =
+        `<span class="result-accent" style="background:linear-gradient(135deg,${colors[0]},${colors[1]})"></span>` +
+        `<span class="result-name">${highlightMatch(p.name, query)}</span>` +
+        `<span class="result-team">${highlightMatch(teamShort, teamQ)}</span>` +
+        `<span class="result-count">${fmtCount(p.totalMintedMomentCount)} Moments</span>`;
+      opt.addEventListener('click', () => selectPlayer(p));
+      opt.addEventListener('mouseenter', () => { highlightIdx = i; updateHighlight(); });
+      resultsEl.appendChild(opt);
+    }
+    highlightIdx = -1;
+    searchInput.removeAttribute('aria-activedescendant');
+  }
+
+  function updateHighlight() {
+    const opts = resultsEl.querySelectorAll('.player-result');
+    opts.forEach((opt, i) => {
+      const selected = i === highlightIdx;
+      opt.classList.toggle('highlighted', selected);
+      opt.setAttribute('aria-selected', selected ? 'true' : 'false');
+      if (selected) {
+        opt.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        searchInput.setAttribute('aria-activedescendant', opt.id);
       }
     });
-    // `/` keyboard shortcut to focus search
-    window.addEventListener('keydown', (e) => {
-      if (e.key === '/' && document.activeElement !== searchInput &&
-          !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+  }
+
+  function selectPlayer(p) {
+    selectionTime = performance.now();
+    searchInput.value = '';
+    resultsEl.innerHTML = '';
+    searchInput.setAttribute('aria-expanded', 'false');
+    searchInput.removeAttribute('aria-activedescendant');
+    highlightIdx = -1;
+    loadAndRoutePlayer(p.playerId || p.player_id || p.name);
+  }
+
+  // Debounced filter+render (150ms).
+  const filterAndRender = debounce(() => {
+    filteredPlayers = filterPlayers(searchInput.value);
+    renderResults(filteredPlayers, searchInput.value.trim());
+    if (pickerCountEl) {
+      pickerCountEl.textContent = allPlayers.length + ' players · ' + filteredPlayers.length + ' shown';
+    }
+  }, 150);
+
+  if (searchInput) {
+    searchInput.addEventListener('input', filterAndRender);
+    searchInput.addEventListener('focus', () => {
+      if (allPlayers.length > 0) {
+        filteredPlayers = filterPlayers(searchInput.value);
+        renderResults(filteredPlayers, searchInput.value.trim());
+      }
+    });
+    // Keyboard navigation (WAI-ARIA combobox pattern).
+    searchInput.addEventListener('keydown', (e) => {
+      const opts = resultsEl.querySelectorAll('.player-result');
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
+        if (opts.length === 0) return;
+        highlightIdx = Math.min(highlightIdx + 1, opts.length - 1);
+        updateHighlight();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (opts.length === 0) return;
+        highlightIdx = Math.max(highlightIdx - 1, 0);
+        updateHighlight();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (highlightIdx >= 0 && filteredPlayers[highlightIdx]) {
+          selectPlayer(filteredPlayers[highlightIdx]);
+        } else if (filteredPlayers.length > 0) {
+          selectPlayer(filteredPlayers[0]);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        searchInput.value = '';
+        filteredPlayers = filterPlayers('');
+        renderResults(filteredPlayers, '');
+        if (pickerCountEl) pickerCountEl.textContent = allPlayers.length + ' players';
         searchInput.focus();
       }
     });
   }
-  if (searchClear) {
-    searchClear.addEventListener('click', () => {
-      searchInput.value = '';
-      currentFilter = '';
-      renderPickerGrid();
-      searchInput.focus();
-    });
-  }
 
-  // Initial render from bundled PLAYERS list
-  renderPickerGrid();
+  // '/' focuses the search bar (preserves existing shortcut).
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== searchInput) {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      if (searchInput) searchInput.focus();
+    }
+  });
 
-  // Async merge the full index.json (top-40) once it's available on the CDN
-  fetch('/data/index.json', { headers: { 'Accept': 'application/json' } })
-    .then(r => r.ok ? r.json() : null)
-    .then(idx => {
-      if (!Array.isArray(idx) || idx.length === 0) return;
-      // Merge: prefer index.json entries (they have mintedEstimate), fall back to bundled PLAYERS
-      const byId = new Map(PLAYERS_META.map(p => [p.playerId, p]));
-      for (const entry of idx) {
-        // Bridge totalMintedMomentCount → mintedEstimate (our data uses the former)
-        if (!entry.mintedEstimate && entry.totalMintedMomentCount) {
-          entry.mintedEstimate = entry.totalMintedMomentCount;
-        }
-        byId.set(entry.playerId, entry);
+  // Initialize the picker from index.json via DataLayer.initIndex().
+  async function initPicker() {
+    try {
+      if (!window.DataLayer || typeof window.DataLayer.initIndex !== 'function') {
+        throw new Error('DataLayer.initIndex unavailable');
       }
-      // Preserve index.json order (user-curated). Don't sort by mint volume.
-      PLAYERS_META = idx.map(e => byId.get(e.playerId) || e);
-      // Also update DataLayer so downstream loadPlayer can accept any new IDs
-      if (window.DataLayer) window.DataLayer.PLAYERS = PLAYERS_META;
-      renderPickerGrid();
-    })
-    .catch(() => { /* silent — bundle is our fallback */ });
+      await window.DataLayer.initIndex();
+      allPlayers = window.DataLayer.PLAYERS || [];
+      if (!Array.isArray(allPlayers) || allPlayers.length === 0) {
+        throw new Error('No players in index');
+      }
+      // Keep PLAYERS_META in sync so loadAndRoutePlayer() can resolve by id/name.
+      PLAYERS_META = allPlayers.slice();
+      if (pickerErrorEl) pickerErrorEl.style.display = 'none';
+      renderTeamChips();
+      filteredPlayers = filterPlayers('');
+      renderResults(filteredPlayers, '');
+      if (pickerCountEl) pickerCountEl.textContent = allPlayers.length + ' players';
+    } catch (err) {
+      console.error('[picker] Failed to load index:', err);
+      if (pickerErrorEl) {
+        pickerErrorEl.style.display = 'flex';
+        const retryBtn = document.getElementById('picker-retry');
+        if (retryBtn) {
+          retryBtn.onclick = () => { pickerErrorEl.style.display = 'none'; initPicker(); };
+        }
+      }
+      if (typeof window.plausible === 'function') {
+        window.plausible('data_fetch_error', { props: { player_id: 'index', error_type: 'load_failed' } });
+      }
+    }
+  }
+  initPicker();
 
   // ======================= Per-player loading UI =======================
   const loadingEl = document.getElementById('player-loading');
@@ -1805,6 +1930,15 @@
     }, 1100);
     // Idle auto-rotate kicks in after 8s of no input, ambient cinema feel
     scheduleIdleAutoRotate();
+    // spec-004: Plausible picker_to_graph timing — fire after the cinematic
+    // camera intro settles (Stage 3 starts at 1100ms + 2200ms glide = 3300ms).
+    if (selectionTime > 0 && typeof window.plausible === 'function') {
+      setTimeout(() => {
+        const renderTime = performance.now();
+        window.plausible('picker_to_graph', { props: { duration_ms: Math.round(renderTime - selectionTime) } });
+        selectionTime = 0;
+      }, 3400);
+    }
 
     // Re-add scene adornments
     setTimeout(() => {
@@ -2730,17 +2864,6 @@
   window.__enterCollectorSpotlight = enterCollectorSpotlight;
   window.__spawnBeamToCollector = _spawnBeamToCollector;
 
-  // ======================= Picker events =======================
-  grid.addEventListener('click', e => {
-    const card = e.target.closest('.player-card');
-    if (!card) return;
-    document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
-    card.classList.add('active');
-    const sp = new URLSearchParams(window.location.search).get('spotlight');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    loadAndRoutePlayer(card.dataset.playerId || card.dataset.player, sp || null);
-  });
-
   // Copy buttons
   document.addEventListener('click', e => {
     const copyBtn = e.target.closest('[data-copy]');
@@ -3482,13 +3605,6 @@
   // ======================= Initial URL routing =======================
   const initial = window.fandomRouter.parseQuery(window.location.search);
   const playerToMark = (initial.level === 'player' || initial.level === 'edition') ? initial.payload.player : null;
-  if (playerToMark) {
-    const card = grid.querySelector('[data-player="' + CSS.escape(playerToMark) + '"]');
-    if (card) {
-      document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
-      card.classList.add('active');
-    }
-  }
   // Only deep-link to a player/edition. With no URL param, stay on the picker.
   if ((initial.level === 'player' || initial.level === 'edition') && initial.payload && initial.payload.player) {
     loadAndRoutePlayer(initial.payload.player, initial.payload.spotlight || null).then(() => {
