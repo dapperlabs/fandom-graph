@@ -2356,44 +2356,111 @@
 
   // ======================= Spotlight mode =======================
   function activateSpotlight(ownerId) {
-    if (!currentData) return;
-    // Find the owner by address, dapperID, or username
-    const o = currentData.ownerArr.find(x =>
-      x.flowAddress === ownerId || x.dapperID === ownerId || x.username === ownerId
-    );
-    if (!o) return;
-
+    if (!currentData || !ownerId) return;
+    // Resolve DOM once; bail silently if the overlay isn't present (defensive).
     const overlay = document.getElementById('spotlight-overlay');
     const unameEl = document.getElementById('spotlight-username');
     const statsEl = document.getElementById('spotlight-stats');
-    unameEl.textContent = o.name;
-    const p = data.players.find(x => x.name === currentPlayer);
-    statsEl.innerHTML = `You are the <strong>#${o.globalRank}</strong> ${currentPlayer} collector — holding <strong>${o.fullHoldings.toLocaleString()}</strong> of the <strong>${p.totalMintedMomentCount.toLocaleString()}</strong> serials ever minted. <br/>${o.pctLabel} · ${o.crossPlayerFan ? `${o.crossPlayerCount}-player fan` : 'Single-player focus'}`;
-    overlay.style.display = 'flex';
-
-    // Share button
     const shareBtn = document.getElementById('spotlight-share');
-    const shareUrl = `${window.location.origin}${window.location.pathname}?player=${encodeURIComponent(currentPlayer)}&spotlight=${encodeURIComponent(o.flowAddress || o.dapperID || o.username)}`;
-    shareBtn.onclick = () => {
-      navigator.clipboard.writeText(shareUrl);
-      shareBtn.textContent = 'Copied ✓';
-      setTimeout(() => { shareBtn.textContent = 'Copy my universe link'; }, 1500);
-    };
+    const dismissBtn = document.getElementById('spotlight-dismiss');
+    if (!overlay || !unameEl || !statsEl) return;
 
-    // Dismiss button
-    document.getElementById('spotlight-dismiss').onclick = () => {
-      overlay.style.display = 'none';
-      // Fly camera to their node
-      const node = currentData.nodes.find(n => n.id === o.id);
-      if (node && Graph) {
-        setTimeout(() => {
-          const distance = 100;
-          const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
-          Graph.cameraPosition({ x: (node.x || 1) * distRatio, y: (node.y || 1) * distRatio, z: (node.z || 1) * distRatio }, node, 1800);
-          openCollectorDrawer(o);
-        }, 200);
+    const p = currentData.player || data.players.find(x => x.name === currentPlayer);
+    if (!p) return;
+
+    // Match by flowAddress, dapperID, or username — same key set the router emits.
+    const matchIn = (list) => (list || []).find(x =>
+      x.flowAddress === ownerId || x.dapperID === ownerId || x.username === ownerId
+    );
+
+    // Full node (top-200 rendered with sprites + click handlers).
+    const o = matchIn(currentData.ownerArr);
+    // Raw owner entry from the full dataset — used to compute a true rank even
+    // when the collector is outside the top-200 rendered in detail.
+    const rawOwner = matchIn(p.owners);
+
+    // Share URL — round-trips the original spotlight param exactly as it entered,
+    // so a deep-link shared from any source re-opens the same overlay.
+    const shareUrl = `${window.location.origin}${window.location.pathname}?player=${encodeURIComponent(currentPlayer)}&spotlight=${encodeURIComponent(ownerId)}`;
+
+    // ---- Case A: collector is inside the top-200 full nodes ----
+    if (o) {
+      unameEl.textContent = o.name;
+      statsEl.innerHTML = `You are the <strong>#${o.globalRank}</strong> ${currentPlayer} collector — holding <strong>${o.fullHoldings.toLocaleString()}</strong> of the <strong>${p.totalMintedMomentCount.toLocaleString()}</strong> serials ever minted. <br/>${o.pctLabel} · ${o.crossPlayerFan ? `${o.crossPlayerCount}-player fan` : 'Single-player focus'}`;
+      overlay.style.display = 'flex';
+
+      if (shareBtn) {
+        shareBtn.style.display = '';
+        shareBtn.onclick = () => {
+          navigator.clipboard.writeText(shareUrl);
+          shareBtn.textContent = 'Copied ✓';
+          setTimeout(() => { shareBtn.textContent = 'Copy my universe link'; }, 1500);
+        };
       }
-    };
+
+      if (dismissBtn) {
+        dismissBtn.style.display = '';
+        dismissBtn.textContent = 'Enter the graph';
+        dismissBtn.onclick = () => {
+          overlay.style.display = 'none';
+          // Fly camera to their node, then open the collector drawer.
+          const node = currentData.nodes.find(n => n.id === o.id);
+          if (node && Graph) {
+            setTimeout(() => {
+              const distance = 100;
+              const distRatio = 1 + distance / Math.hypot(node.x || 1, node.y || 1, node.z || 1);
+              Graph.cameraPosition({ x: (node.x || 1) * distRatio, y: (node.y || 1) * distRatio, z: (node.z || 1) * distRatio }, node, 1800);
+              openCollectorDrawer(o);
+            }, 200);
+          } else {
+            openCollectorDrawer(o);
+          }
+        };
+      }
+      return;
+    }
+
+    // ---- Case B: collector exists in the dataset but is outside the top-200 ----
+    // The graph still loaded; we just can't fly to a specific node. Show a graceful
+    // message with their true rank and the universe size. No crash.
+    if (rawOwner) {
+      // __rank is assigned by buildGraph's rankedOwners.forEach; compute a fallback
+      // rank if it's missing (e.g. if buildGraph was bypassed).
+      const trueRank = rawOwner.__rank || (p.owners.findIndex(x => x === rawOwner) + 1) || null;
+      const totalCollectors = currentData.coverage ? currentData.coverage.M : p.owners.length;
+      unameEl.textContent = rawOwner.username || shortAddr(rawOwner.flowAddress);
+      const rankFragment = trueRank ? `You're <strong>#${trueRank}</strong> — ` : '';
+      statsEl.innerHTML = `${rankFragment}outside the top 200 shown in detail, but part of the universe of <strong>${totalCollectors.toLocaleString()}</strong> collectors. <br/>Hold <strong>${(rawOwner.holdings || 0).toLocaleString()}</strong> ${currentPlayer} serials. The full universe loads below — pan and zoom to find your place in it.`;
+      overlay.style.display = 'flex';
+
+      if (shareBtn) {
+        shareBtn.style.display = '';
+        shareBtn.onclick = () => {
+          navigator.clipboard.writeText(shareUrl);
+          shareBtn.textContent = 'Copied ✓';
+          setTimeout(() => { shareBtn.textContent = 'Copy my universe link'; }, 1500);
+        };
+      }
+
+      if (dismissBtn) {
+        dismissBtn.style.display = '';
+        dismissBtn.textContent = 'Enter the graph';
+        dismissBtn.onclick = () => { overlay.style.display = 'none'; };
+      }
+      return;
+    }
+
+    // ---- Case C: spotlight param matches nothing in the dataset ----
+    // Don't crash; show a minimal graceful state and let the user dismiss into the graph.
+    unameEl.textContent = shortAddr(ownerId);
+    statsEl.innerHTML = `We couldn't find this collector in the ${currentPlayer} universe, but the graph is yours to explore below.`;
+    overlay.style.display = 'flex';
+    if (shareBtn) shareBtn.style.display = 'none';
+    if (dismissBtn) {
+      dismissBtn.style.display = '';
+      dismissBtn.textContent = 'Enter the graph';
+      dismissBtn.onclick = () => { overlay.style.display = 'none'; };
+    }
   }
 
   // ======================= Collector spotlight (graph-level emphasis) =======================
