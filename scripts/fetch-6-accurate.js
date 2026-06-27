@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const API = 'https://public-api.nbatopshot.com/graphql';
-const UA = 'fandom-v3-ingestor/1.0 (r@dapperlabs.com)';
+const UA = 'fandom-graph-ingestor/1.0 (https://github.com/dapperlabs/fandom-graph)';
 const MAX_SERIALS_PER_EDITION = parseInt(process.env.MAX_SERIALS_PER_EDITION || '1000', 10);
 
 const argv = process.argv.slice(2);
