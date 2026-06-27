@@ -3737,3 +3737,89 @@ footer .footer-inner code { font-family: var(--mono); color: var(--fg-muted); }
 @media (max-width: 640px) {
   .graph-coverage { font-size: 10px; padding: 6px 12px; bottom: 56px; }
 }
+
+/* ===== Mobile overlay collapse (spec-003 fix) ===== */
+/* On mobile, the graph overlays (legend, meta, hint, controls, leaderboard)
+   consume too much viewport. Collapse them by default — user can toggle. */
+@media (max-width: 768px) {
+  /* Legend: hidden by default on mobile. Toggled via JS button. */
+  .graph-legend { display: none !important; }
+  .graph-legend.mobile-visible { display: block !important; max-height: 200px; overflow-y: auto; }
+
+  /* Meta: shrink to just the player name. Tap to expand. */
+  .graph-meta {
+    min-width: 0;
+    max-width: 180px;
+    padding: 8px 12px;
+    top: 14px;
+    right: 14px;
+  }
+  .graph-meta .player-name { font-size: 16px; }
+  .graph-meta .row { display: none; }
+  .graph-meta.mobile-expanded .row { display: flex; }
+  .graph-meta.mobile-expanded { max-width: 260px; }
+
+  /* Controls: compact, bottom-left, smaller buttons */
+  .graph-controls {
+    bottom: 14px;
+    left: 14px;
+    gap: 4px;
+  }
+  .graph-controls button {
+    padding: 6px 10px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  /* Hint: hidden on mobile (the controls + touch are enough) */
+  .graph-hint { display: none !important; }
+
+  /* Coverage: keep but move above controls */
+  .graph-coverage { bottom: 50px; }
+
+  /* Leaderboard: already collapsed to 48px by earlier rule.
+     Make it full-width at bottom as a docked bar instead of top-right. */
+  .leaderboard {
+    position: absolute;
+    bottom: 14px;
+    right: 14px;
+    top: auto;
+    width: auto;
+    max-width: 200px;
+    max-height: 48px;
+  }
+  .leaderboard:not(.collapsed) { max-height: 48px; }
+  .leaderboard:not(.collapsed) .lb-sub,
+  .leaderboard:not(.collapsed) .lb-list { display: none; }
+  .leaderboard:not(.collapsed) .lb-collapse { transform: rotate(180deg); }
+  .leaderboard.collapsed { max-height: 48px; }
+  .leaderboard.collapsed .lb-list { display: block; max-height: 300px; overflow-y: auto; }
+  .leaderboard.collapsed .lb-sub { display: block; }
+  .leaderboard.collapsed .lb-collapse { transform: rotate(0deg); }
+
+  /* Breadcrumb + subtitle: hide on mobile (saves space) */
+  .level-breadcrumb { display: none !important; }
+  .level-subtitle { display: none !important; }
+
+  /* Floating toggle button for legend (added by JS) */
+  .mobile-toggle-btn {
+    position: absolute;
+    top: 14px;
+    left: 14px;
+    z-index: 6;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(14px);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .mobile-toggle-btn:hover { border-color: var(--accent-teal); color: var(--accent-teal); }
+}

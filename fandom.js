@@ -1636,15 +1636,18 @@
       }
     }
 
-    // Force tuning — keep the inner circle tight, push regulars further out
-    Graph.d3Force('charge').strength(-200);
+    // Force tuning — spread nodes for readability on mobile + desktop
+    Graph.d3Force('charge').strength(-600);
     Graph.d3Force('link').distance(l => {
-      if (l.kind === 'player-moment') return 80;
+      if (l.kind === 'player-moment') return 120;
       const src = typeof l.source === 'object' ? l.source : null;
-      if (src?.isWhale) return 20;
-      if (src?.tier === 'teal') return 60;
-      return 140;
+      if (src?.isWhale) return 40;
+      if (src?.tier === 'teal') return 100;
+      return 200;
     });
+    // Note: d3.forceCollide not available — 3d-force-graph bundles d3 internally
+    // but doesn't expose it as a global. Strong charge (-600) + wide link distances
+    // handle the spreading; no separate collide force needed.
 
     // Bloom + film grain: deferred a tick so 3d-force-graph's composer is live.
     setTimeout(() => { installBloom(Graph); installGrainCA(Graph); }, 120);
@@ -3495,5 +3498,55 @@
     });
   }
   // else: no auto-route. Picker is visible, graph-area hidden by CSS until first click.
+
+  // ===== Mobile overlay toggles =====
+  // On mobile, overlays are collapsed by CSS. These JS hooks add toggle buttons.
+  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+
+  // Legend toggle button (top-left on mobile)
+  const legendToggle = document.createElement('button');
+  legendToggle.className = 'mobile-toggle-btn';
+  legendToggle.textContent = '☰';
+  legendToggle.title = 'Toggle legend';
+  legendToggle.style.display = 'none';
+  legendToggle.addEventListener('click', () => {
+    const legend = document.getElementById('graph-legend');
+    if (legend) legend.classList.toggle('mobile-visible');
+  });
+  document.querySelector('.graph-area').appendChild(legendToggle);
+
+  // Meta panel: tap to expand stats on mobile
+  const meta = document.getElementById('graph-meta');
+  if (meta) {
+    meta.addEventListener('click', () => {
+      if (isMobile()) meta.classList.toggle('mobile-expanded');
+    });
+  }
+
+  // Show/hide the toggle button when graph becomes visible
+  const showMobileControls = () => {
+    if (isMobile()) {
+      legendToggle.style.display = 'flex';
+    } else {
+      legendToggle.style.display = 'none';
+      // Reset desktop state
+      const legend = document.getElementById('graph-legend');
+      if (legend) legend.classList.remove('mobile-visible');
+      if (meta) meta.classList.remove('mobile-expanded');
+    }
+  };
+
+  // Watch for graph visibility changes
+  const graphArea = document.querySelector('.graph-area');
+  if (graphArea) {
+    const observer = new MutationObserver(() => {
+      const legend = document.getElementById('graph-legend');
+      if (legend && legend.style.display !== 'none') showMobileControls();
+    });
+    observer.observe(graphArea, { attributes: true, subtree: true, attributeFilter: ['style'] });
+  }
+
+  // Also respond to viewport changes (orientation, resize)
+  window.addEventListener('resize', showMobileControls);
 })();
 
