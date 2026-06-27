@@ -22,3 +22,7 @@ Thumbs.db
 # Build cache
 .cache/
 dist/
+
+# Production player data ships in-repo (spec-003 Task 2).
+# Only the 15 curated roster files live in /data/*.json; the 85 non-rostered
+# SPEC-002 files are excluded by absence (not via ignore rule).

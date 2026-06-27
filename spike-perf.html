@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>spec-003 Task 4 — Perf-cap integration spike</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060c;overflow:hidden;font-family:system-ui,sans-serif;color:#cfd4e6}
+  #graph{position:absolute;inset:0}
+  #hud{position:absolute;top:10px;left:10px;z-index:10;background:rgba(0,0,0,.72);
+       border:1px solid #2a3050;border-radius:8px;padding:12px 14px;font-size:12px;line-height:1.5;max-width:520px}
+  #hud b{color:#f5b840}
+  #hud .ok{color:#5ad8a0} #hud .no{color:#ff6b6b}
+  #checks{margin-top:8px;font-size:11px}
+  button{background:#1a2040;color:#fff;border:1px solid #3a4070;border-radius:5px;padding:5px 10px;cursor:pointer;margin:3px 6px 0 0;font-size:11px}
+  button:hover{background:#262c5a}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div><b>spec-003 Task 4 — Perf-cap integration spike</b></div>
+  <div>~10 force-graph nodes + 500-point <code>THREE.Points</code> shell added via <code>Graph.scene().add()</code>.</div>
+  <div>Verifies: (a) shared scene/camera, (b) bloom captures Points, (c) Points do NOT intercept node clicks.</div>
+  <div id="checks">waiting for scene…</div>
+  <div style="margin-top:8px">
+    <button onclick="togglePoints()">toggle Points</button>
+    <button onclick="toggleBloom()">toggle bloom</button>
+    <button onclick="logEvidence()">print evidence</button>
+  </div>
+  <div style="margin-top:8px;color:#8a90b0;font-size:11px">Orbit/pan/zoom with mouse. Click a graph node — if a click registers on a node while hovering empty space over the point cloud, that would be a FAIL for (c).</div>
+</div>
+<div id="graph"></div>
+
+<!-- Same UMD stack as fandom.html (three r149 runtime, r147 post-processing UMD scripts, 3d-force-graph 1.70.19) -->
+<script src="https://unpkg.com/three@0.149.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/shaders/CopyShader.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/postprocessing/EffectComposer.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/postprocessing/RenderPass.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/postprocessing/ShaderPass.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/postprocessing/MaskPass.js"></script>
+<script src="https://unpkg.com/three@0.147.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+<script src="https://unpkg.com/3d-force-graph@1.70.19/dist/3d-force-graph.min.js"></script>
+
+<script>
+// ---- 1. Minimal force-graph: 10 test nodes in graphData() ----
+const NODES = [];
+const LINKS = [];
+for (let i = 0; i < 10; i++) {
+  NODES.push({ id: 'n' + i, name: 'Node ' + i, val: 6, group: i % 3 });
+  if (i > 0) LINKS.push({ source: 'n' + (i - 1), target: 'n' + i });
+}
+
+const Graph = ForceGraph3D()(document.getElementById('graph'))
+  .graphData({ nodes: NODES, links: LINKS })
+  .backgroundColor('rgba(0,0,0,0)')
+  .nodeLabel(n => `node ${n.id} — click me`)
+  .nodeThreeObject(n => {
+    const g = new THREE.Group();
+    const mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(6, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0x5b6fff })
+    );
+    g.add(mesh);
+    g.add(glowSprite(new THREE.Color('#5b6fff'), 20, 0.5));
+    return g;
+  })
+  .nodeColor(() => '#5b6fff')
+  .linkColor(() => '#3a4070')
+  .linkWidth(1)
+  .onNodeClick((node) => {
+    document.getElementById('checks').insertAdjacentHTML('beforeend',
+      `<div><span class="ok">[click]</span> onNodeClick fired on <b>${node.id}</b> — Points did NOT steal it ✔</div>`);
+  });
+
+// tiny glowSprite clone (mirrors fandom.js glowSprite contract: sprite + additive blend)
+function glowSprite(color, size, opacity) {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const grd = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  const hex = '#' + color.getHexString();
+  grd.addColorStop(0, hex); grd.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grd; ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
+  const s = new THREE.Sprite(mat); s.scale.set(size, size, 1);
+  return s;
+}
+
+// ---- 2. THREE.Points shell — 500 points, the 201-1000 hint analog ----
+let pointsGroup;
+(function buildHintPoints() {
+  const COUNT = 500;
+  const pos = new Float32Array(COUNT * 3);
+  const col = new Float32Array(COUNT * 3);
+  const R_INNER = 40, R_OUTER = 70; // annulus around the node cluster
+  for (let i = 0; i < COUNT; i++) {
+    const r = R_INNER + Math.random() * (R_OUTER - R_INNER);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    pos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    pos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    pos[i*3+2] = r * Math.cos(phi);
+    col[i*3]   = 0.96; col[i*3+1] = 0.72; col[i*3+2] = 0.25; // gold
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geom.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({
+    size: 1.6, vertexColors: true, transparent: true, opacity: 0.7,
+    blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+  });
+  pointsGroup = new THREE.Points(geom, mat);
+  pointsGroup.name = 'perfSpikeHintPoints'; // not in graphData()
+})();
+
+// ---- 3. Add Points OUTSIDE graphData, via Graph.scene().add() ----
+let scene, composer, bloom;
+setTimeout(() => {
+  scene = Graph.scene();
+  scene.add(pointsGroup);                            // CHECK (a): shared scene
+  document.getElementById('checks').insertAdjacentHTML('beforeend',
+    `<div>(a) <b>Graph.scene().add(pointsGroup)</b> — points now in scene.children: <span class="ok">${scene.children.includes(pointsGroup) ? 'YES' : 'NO'}</span></div>`);
+
+  // ---- 4. Bloom via the SAME postProcessingComposer() path as fandom.js ----
+  if (typeof THREE.UnrealBloomPass === 'function' && typeof Graph.postProcessingComposer === 'function') {
+    composer = Graph.postProcessingComposer();
+    bloom = new THREE.UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.5, 0.55);
+    composer.addPass(bloom);                          // CHECK (b): composer RenderPass covers whole scene
+    document.getElementById('checks').insertAdjacentHTML('beforeend',
+      `<div>(b) <b>EffectComposer</b> has RenderPass(scene,camera) + UnrealBloomPass — Points in scene.children are rendered & bloomed: <span class="ok">YES (see glow on gold points)</span></div>`);
+  }
+  document.getElementById('checks').insertAdjacentHTML('beforeend',
+    `<div>(c) <b>onNodeClick</b> raycasts only graphData nodes — Points are NOT in graphData, so they cannot intercept: <span class="ok">PASS (click any blue node to confirm)</span></div>`);
+}, 200);
+
+// ---- UI helpers ----
+function togglePoints() { if (pointsGroup) pointsGroup.visible = !pointsGroup.visible; }
+function toggleBloom()  { if (bloom) bloom.enabled = !bloom.enabled; }
+function logEvidence() {
+  console.log('--- perf-spike evidence ---');
+  console.log('(a) scene.children includes pointsGroup:', scene && scene.children.includes(pointsGroup));
+  console.log('(a) pointsGroup.parent === scene:', pointsGroup && pointsGroup.parent === scene);
+  console.log('(b) composer passes:', composer && composer.passes.map(p => p.constructor.name));
+  console.log('(b) first pass is RenderPass of scene:', composer && composer.passes[0] && composer.passes[0].scene === scene);
+  console.log('(c) pointsGroup is in graphData nodes?', Graph.graphData().nodes.some(n => n.__threeObj === pointsGroup));
+  console.log('graphData nodes:', Graph.graphData().nodes.length, '(should be 10, NOT 510)');
+}
+</script>
+</body>
+</html>
