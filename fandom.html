@@ -117,6 +117,11 @@
   .fandom-footer-section h2 { font-family: var(--hdr); font-weight: 900; font-size: clamp(40px, 5.5vw, 72px); line-height: 0.95; text-transform: uppercase; letter-spacing: -0.01em; margin: 0 0 16px; }
   .fandom-footer-section p { font-size: 16px; line-height: 1.6; color: var(--fg-muted); max-width: 64ch; margin: 0 0 16px; font-weight: 300; }
 </style>
+<!-- Plausible privacy-first analytics (spec-003 Task 8). data-exclude-search strips the
+     ?spotlight=<flowAddress> query string so wallet addresses never leave the browser in
+     the automatic pageview event. Custom deep-link events below send only the numeric
+     playerId + a boolean spotlight flag — never an address, dapperID, or username. -->
+<script defer data-api="https://plausible.io/api/event" data-domain="topshot.world" data-exclude-search src="https://plausible.io/js/script.js"></script>
 </head>
 <body>
 

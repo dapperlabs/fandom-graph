@@ -1758,6 +1758,11 @@
     document.getElementById('gm-player').textContent = playerName;
     // Moments = total minted (every serial is a unique Moment).
     const playerPayload = data.players.find(x => x.name === playerName);
+    // Privacy-first analytics (spec-003 Task 8): fire a deep-link event carrying ONLY the
+    // numeric playerId — never the player name, wallet address, dapperID, or username.
+    if (typeof window.plausible === 'function' && playerPayload && playerPayload.playerId) {
+      window.plausible('deep_link_player', { props: { player_id: String(playerPayload.playerId) } });
+    }
     const totalMoments = playerPayload?.totalMintedMomentCount || currentData.stats.totalMinted || 0;
     // Epic intro: count up from 0 to the real number over 1.4s. Hooks visceral
     // "wait, this is enormous" reaction the moment the universe lands.
@@ -2368,6 +2373,12 @@
     const p = currentData.player || data.players.find(x => x.name === currentPlayer);
     if (!p) return;
 
+    // Privacy-first analytics (spec-003 Task 8): carry ONLY the numeric playerId + a
+    // boolean spotlight flag. Never the flowAddress, dapperID, or username — those stay
+    // in the browser. (The address arrives as `ownerId` but is never sent outbound.)
+    if (typeof window.plausible === 'function' && p && p.playerId) {
+      window.plausible('deep_link_spotlight', { props: { player_id: String(p.playerId), spotlight: true } });
+    }
     // Match by flowAddress, dapperID, or username — same key set the router emits.
     const matchIn = (list) => (list || []).find(x =>
       x.flowAddress === ownerId || x.dapperID === ownerId || x.username === ownerId
