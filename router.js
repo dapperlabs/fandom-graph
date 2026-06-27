@@ -1,4 +1,4 @@
-// Fandom Graph router — URL <-> level state. Levels: league|team|player|edition|collector.
+// Fandom Graph router — URL <-> level state. Levels: player|edition|collector. Picker = boot/no-op.
 (function (global) {
   const handlers = {};
   let currentState = null;
@@ -8,9 +8,7 @@
     if (p.get('edition'))   return { level: 'edition',   payload: { key: p.get('edition'), player: p.get('player') || null } };
     if (p.get('collector')) return { level: 'collector', payload: { addr: p.get('collector') } };
     if (p.get('player'))    return { level: 'player',    payload: { player: p.get('player'), spotlight: p.get('spotlight') || null } };
-    if (p.get('team'))      return { level: 'team',      payload: { team: p.get('team') } };
-    if (p.get('league'))    return { level: 'league',    payload: {} };
-    return { level: 'league', payload: {} };
+    return { level: 'picker', payload: {} };
   }
 
   function buildUrl(level, payload) {
@@ -18,10 +16,9 @@
     u.search = '';
     const q = u.searchParams;
     if (level === 'player')       { q.set('player', payload.player); if (payload.spotlight) q.set('spotlight', payload.spotlight); }
-    else if (level === 'team')    { q.set('team', payload.team); }
     else if (level === 'edition') { q.set('edition', payload.key); if (payload.player) q.set('player', payload.player); }
     else if (level === 'collector') { q.set('collector', payload.addr); }
-    // league = no params
+    // picker = no params
     return u.pathname + (q.toString() ? '?' + q.toString() : '');
   }
 
@@ -51,6 +48,8 @@
   function renderBreadcrumb() {
     const el = document.getElementById('level-breadcrumb');
     if (!el) return;
+    // Picker boot state: no breadcrumb.
+    if (currentState.level === 'picker') { el.style.display = 'none'; while (el.firstChild) el.removeChild(el.firstChild); return; }
     const crumbs = (handlers[currentState.level] && handlers[currentState.level].buildCrumbs)
       ? handlers[currentState.level].buildCrumbs(currentState.payload)
       : [{ label: currentState.level, level: currentState.level, payload: currentState.payload }];
@@ -76,9 +75,7 @@
         el.appendChild(sep);
       }
     });
-    // Hide on true league root (no crumbs beyond NBA alone and level === league)
-    const justLeague = crumbs.length === 1 && currentState.level === 'league';
-    el.style.display = justLeague ? 'none' : 'flex';
+    el.style.display = crumbs.length ? 'flex' : 'none';
   }
 
   window.addEventListener('popstate', function (ev) {
@@ -91,11 +88,9 @@
     if (currentState.level === 'edition' && currentState.payload && currentState.payload.player) {
       go('player', { player: currentState.payload.player });
     } else if (currentState.level === 'player') {
-      go('league', {});
-    } else if (currentState.level === 'team') {
-      go('league', {});
+      go('picker', {});
     } else if (currentState.level === 'collector') {
-      go('league', {});
+      go('picker', {});
     }
   });
 
