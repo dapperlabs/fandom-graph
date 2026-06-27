@@ -1798,7 +1798,7 @@
     }, 200);
     // Stage 3: arrival glide — slower easing for the settle, lets the eye catch up
     setTimeout(() => {
-      g.cameraPosition({ x: 225, y: 137, z: 450 }, { x: 0, y: 0, z: 0 }, 2200);
+      g.cameraPosition({ x: 550, y: 340, z: 900 }, { x: 0, y: 0, z: 0 }, 2200);
     }, 1100);
     // Idle auto-rotate kicks in after 8s of no input, ambient cinema feel
     scheduleIdleAutoRotate();
@@ -2627,9 +2627,9 @@
   function _idleSpin() {
     if (!_idleSpinning || !Graph) return;
     _idleSpinT += 0.0008;  // slow drift
-    const dist = 460;
+    const dist = 1100;
     Graph.cameraPosition(
-      { x: dist * Math.sin(_idleSpinT), y: 100 + 30 * Math.sin(_idleSpinT * 0.5), z: dist * Math.cos(_idleSpinT) },
+      { x: dist * Math.sin(_idleSpinT), y: 200 + 60 * Math.sin(_idleSpinT * 0.5), z: dist * Math.cos(_idleSpinT) },
       undefined, 0
     );
     requestAnimationFrame(_idleSpin);
@@ -2750,7 +2750,7 @@
   });
 
   document.getElementById('btn-reset').addEventListener('click', () => {
-    if (Graph) Graph.cameraPosition({ x: 225, y: 137, z: 450 }, { x: 0, y: 0, z: 0 }, 1000);
+    if (Graph) Graph.cameraPosition({ x: 550, y: 340, z: 900 }, { x: 0, y: 0, z: 0 }, 1000);
   });
   document.getElementById('btn-spin').addEventListener('click', e => {
     autoRotate = !autoRotate;
@@ -2807,8 +2807,8 @@
   function spin() {
     if (!autoRotate || !Graph) return;
     spinT += 0.003;
-    const dist = 500;
-    Graph.cameraPosition({ x: dist * Math.sin(spinT), y: 100, z: dist * Math.cos(spinT) });
+    const dist = 1100;
+    Graph.cameraPosition({ x: dist * Math.sin(spinT), y: 200, z: dist * Math.cos(spinT) });
     requestAnimationFrame(spin);
   }
 
