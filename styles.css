@@ -365,6 +365,27 @@ details[open] .sig-expand::after { content: ''; }
   flex-direction: column;
   box-shadow: 0 12px 40px rgba(0,0,0,0.45);
 }
+@media (max-width: 768px) {
+  .leaderboard {
+    width: calc(100% - 32px);
+    max-width: 360px;
+    right: 16px;
+    top: 14px;
+  }
+  .leaderboard:not(.collapsed) {
+    max-height: 48px;
+  }
+  .leaderboard:not(.collapsed) .lb-sub,
+  .leaderboard:not(.collapsed) .lb-list {
+    display: none;
+  }
+  .leaderboard:not(.collapsed) .lb-collapse {
+    transform: rotate(180deg);
+  }
+  .leaderboard.collapsed {
+    max-height: 48px;
+  }
+}
 .leaderboard.collapsed .lb-sub,
 .leaderboard.collapsed .lb-list { display: none; }
 .leaderboard.collapsed { max-height: 62px; }

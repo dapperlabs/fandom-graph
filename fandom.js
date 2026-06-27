@@ -1798,7 +1798,7 @@
     }, 200);
     // Stage 3: arrival glide — slower easing for the settle, lets the eye catch up
     setTimeout(() => {
-      g.cameraPosition({ x: 180, y: 110, z: 360 }, { x: 0, y: 0, z: 0 }, 2200);
+      g.cameraPosition({ x: 225, y: 137, z: 450 }, { x: 0, y: 0, z: 0 }, 2200);
     }, 1100);
     // Idle auto-rotate kicks in after 8s of no input, ambient cinema feel
     scheduleIdleAutoRotate();
@@ -2750,7 +2750,7 @@
   });
 
   document.getElementById('btn-reset').addEventListener('click', () => {
-    if (Graph) Graph.cameraPosition({ x: 180, y: 110, z: 360 }, { x: 0, y: 0, z: 0 }, 1000);
+    if (Graph) Graph.cameraPosition({ x: 225, y: 137, z: 450 }, { x: 0, y: 0, z: 0 }, 1000);
   });
   document.getElementById('btn-spin').addEventListener('click', e => {
     autoRotate = !autoRotate;
