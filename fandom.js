@@ -3500,21 +3500,7 @@
   // else: no auto-route. Picker is visible, graph-area hidden by CSS until first click.
 
   // ===== Mobile overlay toggles =====
-  // On mobile, overlays are collapsed by CSS (@media max-width:768px).
-  // These JS hooks add interactive toggles for the user to expand them.
-
-  // Legend toggle button (top-left on mobile, shown/hidden by CSS media query)
-  const legendToggle = document.createElement('button');
-  legendToggle.className = 'mobile-toggle-btn';
-  legendToggle.textContent = '☰';
-  legendToggle.title = 'Toggle legend';
-  legendToggle.addEventListener('click', () => {
-    const legend = document.getElementById('graph-legend');
-    if (legend) legend.classList.toggle('mobile-visible');
-  });
-  const graphAreaEl = document.querySelector('.graph-area');
-  if (graphAreaEl) graphAreaEl.appendChild(legendToggle);
-
+  // Legend toggle button is now in fandom.html (inline onclick).
   // Meta panel: tap to expand stats on mobile
   const meta = document.getElementById('graph-meta');
   if (meta) {
