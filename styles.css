@@ -442,13 +442,15 @@ details[open] .sig-expand::after { content: ''; }
 .lb-row {
   display: grid;
   grid-template-columns: 28px 36px 1fr auto;
-  grid-template-rows: auto 3px;
+  grid-template-rows: 1fr 3px;
   gap: 8px 10px;
   align-items: center;
-  padding: 10px 10px;
+  height: 64px;
+  padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.12s ease;
+  box-sizing: content-box;
 }
 .lb-row:hover { background: rgba(255,255,255,0.04); }
 .lb-row.is-me {
