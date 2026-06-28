@@ -1313,9 +1313,9 @@
         if (n.type === 'collector') {
           const rankBadge = n.globalRank <= 10 ? `<span style="color:#f5b840; font-weight:800;">#${n.globalRank}</span>` : `<span style="color:#9aa;">#${n.globalRank}</span>`;
           const badges = [];
-          if (n.isWhale) badges.push('<b style="color:#f5b840;">INNER CIRCLE</b>');
+          if (n.isWhale) badges.push('<b style="color:#f5b840;">TOP 10 LOCKED</b>');
           if (n.crossPlayerFan) badges.push(`<b style="color:#ff9a4a;">MULTI-PLAYER (${n.crossPlayerCount})</b>`);
-          return `<div style="background:rgba(0,0,0,0.92); padding:12px 16px; border-radius:8px; color:#fff; border:1px solid ${esc(n.color)}; font-size:12px; min-width:220px;">${rankBadge} <span style="font-weight:700; font-size:14px;">${esc(n.name)}</span>${badges.length ? '<br/>' + badges.join(' · ') : ''}<br/><span style="color:#9aa; font-size:11px;">${n.fullHoldings.toLocaleString()} serials held · ${esc(n.pctLabel)}</span></div>`;
+          return `<div style="background:rgba(0,0,0,0.92); padding:12px 16px; border-radius:8px; color:#fff; border:1px solid ${esc(n.color)}; font-size:12px; min-width:220px;">${rankBadge} <span style="font-weight:700; font-size:14px;">${esc(n.name)}</span>${badges.length ? '<br/>' + badges.join(' · ') : ''}<br/><span style="color:#9aa; font-size:11px;">${fmtLockedScore(n.lockedScore)} locked score · ${n.fullHoldings.toLocaleString()} moments owned · ${esc(n.pctLabel)}</span></div>`;
         }
       })
       .nodeThreeObject(n => {
