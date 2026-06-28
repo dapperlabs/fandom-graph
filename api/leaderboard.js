@@ -66,9 +66,9 @@ export default async function handler(request) {
     allEntries = allEntries.slice(0, limit);
 
     const entries = allEntries.map(e => ({
-      rank: e.rank,
-      lockedScore: e.score,
-      displayScore: e.displayScore,
+      rank: Number(e.rank) || 0,
+      lockedScore: Number(e.score) || 0,
+      displayScore: Number(e.displayScore) || 0,
       username: e.user?.username || null,
       flowAddress: e.user?.flowAddress || null,
       profileImageUrl: e.user?.profileImageUrl || null,
