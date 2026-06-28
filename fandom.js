@@ -113,6 +113,13 @@
     if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
     return '$' + Math.round(v);
   }
+  function fmtLockedScore(cents) {
+    if (!cents || cents <= 0) return '$0';
+    const dollars = cents / 100;
+    if (dollars >= 1e6) return '$' + (dollars / 1e6).toFixed(2) + 'M';
+    if (dollars >= 1e3) return '$' + (dollars / 1e3).toFixed(1) + 'K';
+    return '$' + Math.round(dollars).toLocaleString();
+  }
   function shortAddr(a) { if (!a) return '—'; return a.length > 10 ? a.slice(0, 6) + '…' + a.slice(-4) : a; }
   function initials(name) { return (name || '').split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase(); }
   function ownerLabel(o) { return o.username || shortAddr(o.flowAddress); }
@@ -518,6 +525,37 @@
         }
       }
       data.players = [payload];
+      // Fetch locked-score leaderboard from atlas API (via Edge proxy).
+      // Re-ranks owners by locked ASP (sum of locked moments' ASP) instead of
+      // raw ownership count. Falls back to ownership-based ranking on failure.
+      try {
+        const lockedData = await window.DataLayer.loadLockedLeaderboard(meta.playerId);
+        if (lockedData && lockedData.entries) {
+          const lockedMap = new Map();
+          for (const e of lockedData.entries) {
+            lockedMap.set(e.flowAddress, { lockedScore: e.lockedScore, lockedRank: e.rank });
+          }
+          for (const o of payload.owners) {
+            const locked = lockedMap.get(o.flowAddress);
+            o.lockedScore = locked ? locked.lockedScore : 0;
+            o.lockedRank = locked ? locked.lockedRank : null;
+          }
+          // Re-sort by lockedScore DESC, fall back to holdings for ties/zeroes
+          payload.owners.sort((a, b) => (b.lockedScore || 0) - (a.lockedScore || 0) || b.holdings - a.holdings);
+          // Update globalRank to locked-score rank
+          payload.owners.forEach((o, i) => { o.globalRank = i + 1; });
+          payload.lockedLeaderboardCount = lockedData.totalCount;
+          payload.lockedTotalScore = lockedData.entries.reduce((s, e) => s + (e.lockedScore || 0), 0);
+        } else {
+          // Fallback: ownership-based ranking (existing behavior)
+          payload.lockedLeaderboardCount = payload.owners.length;
+          payload.lockedTotalScore = 0;
+        }
+      } catch (e) {
+        console.warn('[fandom] locked leaderboard fetch failed, falling back to ownership ranking:', e);
+        payload.lockedLeaderboardCount = payload.owners.length;
+        payload.lockedTotalScore = 0;
+      }
       rebuildOwnerIndexes();
       hidePlayerLoading();
       document.body.classList.add('viewing-player');
@@ -911,6 +949,8 @@
         holdings: owner.holdings,         // true count from data, not sampled tally
         fullHoldings: owner.holdings,
         globalRank: owner.__rank,
+        lockedScore: owner.lockedScore || 0,
+        lockedRank: owner.lockedRank || null,
         momentsOwned,
         valueHeld: owner.holdings * playerAvgUnit
       };
@@ -1051,7 +1091,8 @@
     // These drive the "Showing top S of M collectors" affordance and the
     // window.__fandomCoverage hook for the smoke test.
     const coverageS = ownerArr.length;
-    const coverageM = p.owners.length;
+    const coverageM = p.lockedLeaderboardCount || p.owners.length;
+    const lockedTotalScore = p.lockedTotalScore || 0;
 
     return {
       player: p,
@@ -1059,13 +1100,14 @@
       editionNodes,
       ownerArr,
       hintPoints,
-      coverage: { S: coverageS, M: coverageM },
+      coverage: { S: coverageS, M: coverageM, locked: !!p.lockedLeaderboardCount && p.lockedLeaderboardCount !== p.owners.length },
       stats: {
         editions: p.editions.length,
         totalMinted: p.totalMintedMomentCount,
-        collectors: p.owners.length,
-        whales: Math.min(10, p.owners.length),
+        collectors: coverageM,
+        whales: Math.min(10, ownerArr.length),
         totalOwnerCount: p.owners.length,
+        lockedTotalScore,
         topCollector: ownerArr[0]
       }
     };
@@ -1911,6 +1953,25 @@
     animateCount(document.getElementById('gm-collectors'), currentData.stats.collectors || 0, 1300);
     animateCount(document.getElementById('gm-whales'), currentData.stats.whales || 0, 1100);
     animateCount(document.getElementById('gm-serials'), currentData.stats.editions || 0, 900);
+    // Locked score total (sum of all locked ASP for this player) — shown as currency.
+    const lockedTotal = currentData.stats.lockedTotalScore || 0;
+    const gmLocked = document.getElementById('gm-locked');
+    if (gmLocked) {
+      if (lockedTotal > 0) {
+        const t0l = performance.now();
+        const easeL = (t) => 1 - Math.pow(1 - t, 3);
+        const tickL = (now) => {
+          const t = Math.min(1, (now - t0l) / 1200);
+          const v = Math.floor(lockedTotal * easeL(t));
+          gmLocked.textContent = fmtLockedScore(v);
+          if (t < 1) requestAnimationFrame(tickL);
+          else gmLocked.textContent = fmtLockedScore(lockedTotal);
+        };
+        requestAnimationFrame(tickL);
+      } else {
+        gmLocked.textContent = '—';
+      }
+    }
 
     renderLeaderboard(currentData);
 
@@ -1976,9 +2037,9 @@
       if (cov.M === 0) {
         coverageEl.textContent = 'No collector data available';
       } else if (cov.M <= cov.S) {
-        coverageEl.textContent = 'Showing all ' + cov.M.toLocaleString() + ' collectors';
+        coverageEl.textContent = 'Showing all ' + cov.M.toLocaleString() + (cov.locked ? ' locked collectors' : ' collectors');
       } else {
-        coverageEl.textContent = 'Showing top ' + cov.S + ' of ' + cov.M.toLocaleString() + ' collectors';
+        coverageEl.textContent = 'Showing top ' + cov.S + ' of ' + cov.M.toLocaleString() + (cov.locked ? ' locked collectors' : ' collectors');
       }
     }
     window.__fandomCoverage = { S: cov.S, M: cov.M };
@@ -2057,8 +2118,9 @@
     const sub = document.getElementById('lb-sub');
     lb.innerHTML = '';
     const p = graphData.player;
-    sub.textContent = `${p.owners.length.toLocaleString()} collectors of ${p.name}. Inner circle holds the most.`;
-    const max = Math.max(...graphData.ownerArr.slice(0, 10).map(o => o.fullHoldings));
+    const lockedTotal = p.lockedLeaderboardCount || p.owners.length;
+    sub.textContent = `${lockedTotal.toLocaleString()} locked collectors of ${p.name}. Ranked by locked score.`;
+    const max = Math.max(1, ...graphData.ownerArr.slice(0, 10).map(o => o.lockedScore || 0));
     for (let i = 0; i < Math.min(10, graphData.ownerArr.length); i++) {
       const o = graphData.ownerArr[i];
       const row = document.createElement('div');
@@ -2091,7 +2153,7 @@
 
       const holdEl = document.createElement('div');
       holdEl.className = 'lb-holdings';
-      holdEl.textContent = o.fullHoldings.toLocaleString();
+      holdEl.textContent = fmtLockedScore(o.lockedScore);
 
       row.appendChild(rankEl);
       row.appendChild(avEl);
@@ -2109,7 +2171,7 @@
       bar.className = 'lb-bar';
       const fill = document.createElement('div');
       fill.className = 'lb-bar-fill';
-      fill.style.width = `${(o.fullHoldings / max) * 100}%`;
+      fill.style.width = `${Math.min(100, ((o.lockedScore || 0) / max) * 100)}%`;
       bar.appendChild(fill);
       row.appendChild(bar);
 
@@ -2153,8 +2215,9 @@
     clearDrawer();
     const p = data.players.find(x => x.name === currentPlayer);
     if (!p) return; // defensive — shouldn't happen at L2
-    const total = p.owners.length;
+    const total = p.lockedLeaderboardCount || p.owners.length;
     const rank = n.globalRank;
+    const lockedScore = n.lockedScore || 0;
 
     // Hero (avatar + rank + username)
     const hero = mkEl('div', { className: 'collector-hero' });
@@ -2162,9 +2225,8 @@
     if (n.profileImageUrl) av.style.backgroundImage = `url("${n.profileImageUrl.replace(/"/g, '&quot;')}")`;
     else av.textContent = initials(n.name);
     hero.appendChild(av);
-    const meta = mkEl('div', { className: 'collector-hero-meta' });
-    meta.appendChild(mkEl('div', { className: 'collector-hero-rank', text: `#${rank}` }));
-    meta.appendChild(mkEl('div', { className: 'collector-hero-label', text: `${currentPlayer} collector · in this graph` }));
+    meta.appendChild(mkEl('div', { className: 'collector-hero-rank', text: `#${rank} · ${fmtLockedScore(lockedScore)}` }));
+    meta.appendChild(mkEl('div', { className: 'collector-hero-label', text: `${currentPlayer} collector · locked score rank` }));
     meta.appendChild(mkEl('div', { className: 'collector-hero-username', text: n.name }));
     hero.appendChild(meta);
     drawerInner.appendChild(hero);
@@ -2179,13 +2241,13 @@
     fill.style.width = `${fillPct}%`;
     bar.appendChild(fill);
     pct.appendChild(bar);
-    pct.appendChild(mkEl('div', { className: 'percentile-value', text: `${n.fullHoldings.toLocaleString()} / ${p.totalMintedMomentCount.toLocaleString()}` }));
+    pct.appendChild(mkEl('div', { className: 'percentile-value', text: `Locked: ${fmtLockedScore(lockedScore)} · Owned: ${n.fullHoldings.toLocaleString()} moments` }));
     drawerInner.appendChild(pct);
 
     // Stats grid
     const rarRow = mkEl('div', { className: 'rar-row' });
     const sp1 = document.createElement('span');
-    sp1.innerHTML = `<strong>${n.fullHoldings.toLocaleString()}</strong> serials held`;
+    sp1.innerHTML = `<strong>${fmtLockedScore(lockedScore)}</strong> locked score · <strong>#${rank}</strong> rank`;
     rarRow.appendChild(sp1);
     const sp2 = document.createElement('span');
     const pctHeld = (n.fullHoldings / p.totalMintedMomentCount * 100).toFixed(2);
@@ -2210,7 +2272,7 @@
         const el = mkEl('div', { className: 'neighbor' });
         el.appendChild(mkEl('div', { className: 'neighbor-dir', text: dir }));
         el.appendChild(mkEl('div', { className: 'neighbor-name', text: `#${o.globalRank} · ${o.name}` }));
-        el.appendChild(mkEl('div', { className: 'neighbor-holdings', text: `${o.fullHoldings.toLocaleString()} serials` }));
+        el.appendChild(mkEl('div', { className: 'neighbor-holdings', text: fmtLockedScore(o.lockedScore || 0) }));
         el.addEventListener('click', () => openCollectorDrawer(o));
         return el;
       }
@@ -2534,7 +2596,11 @@
     // ---- Case A: collector is inside the top-200 full nodes ----
     if (o) {
       unameEl.textContent = o.name;
-      statsEl.innerHTML = `You are the <strong>#${o.globalRank}</strong> ${currentPlayer} collector — holding <strong>${o.fullHoldings.toLocaleString()}</strong> of the <strong>${p.totalMintedMomentCount.toLocaleString()}</strong> serials ever minted. <br/>${o.pctLabel} · ${o.crossPlayerFan ? `${o.crossPlayerCount}-player fan` : 'Single-player focus'}`;
+      const lockedScore = o.lockedScore || 0;
+      const lockedStats = lockedScore > 0
+        ? `locked score of <strong>${fmtLockedScore(lockedScore)}</strong> — ranked <strong>#${o.globalRank}</strong> among ${currentPlayer} collectors`
+        : `You own <strong>${o.fullHoldings.toLocaleString()}</strong> ${currentPlayer} moments but haven't locked any yet`;
+      statsEl.innerHTML = `You are the <strong>#${o.globalRank}</strong> ${currentPlayer} collector — ${lockedStats}. <br/>${o.pctLabel} · ${o.crossPlayerFan ? `${o.crossPlayerCount}-player fan` : 'Single-player focus'}`;
       overlay.style.display = 'flex';
 
       if (shareBtn) {

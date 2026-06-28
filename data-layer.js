@@ -50,6 +50,25 @@ const DataLayer = {
     return data;
   },
 
+  // Load the locked-score leaderboard from the atlas API (via our Edge proxy).
+  // Returns { entries: [{ rank, lockedScore, username, flowAddress, profileImageUrl, dapperId }], totalCount }.
+  // Falls back to null if the API is unavailable (graph shows ownership data instead).
+  async loadLockedLeaderboard(playerId) {
+    const id = String(playerId);
+    const cacheKey = `locked:${id}`;
+    if (_cache.has(cacheKey)) return _cache.get(cacheKey);
+    try {
+      const res = await fetch(`/api/leaderboard?playerId=${id}&limit=1000`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      _cache.set(cacheKey, data);
+      return data;
+    } catch (e) {
+      console.warn('DataLayer: locked leaderboard fetch failed', e);
+      return null;
+    }
+  }
+
   // Load index.json as the single source of player metadata.
   // Called once at startup. The picker renders from this.
   async initIndex() {
