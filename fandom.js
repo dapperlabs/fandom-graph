@@ -115,11 +115,13 @@
   }
   function fmtLockedScore(score) {
     if (!score || score <= 0) return '0';
-    // The atlas API returns score as an integer (summed ASP in cents).
-    // The Top Shot app displays it as a plain number with commas — not currency.
-    if (score >= 1e6) return (score / 1e6).toFixed(2) + 'M';
-    if (score >= 1e3) return (score / 1e3).toFixed(1) + 'K';
-    return Math.round(score).toLocaleString();
+    // The atlas API returns score in cents (ScoreScale = 100).
+    // displayScore = score / 100. The Top Shot app shows displayScore
+    // as a plain number (no currency symbol). We do the same.
+    const v = score / 100;
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return Math.round(v).toLocaleString();
   }
   function shortAddr(a) { if (!a) return '—'; return a.length > 10 ? a.slice(0, 6) + '…' + a.slice(-4) : a; }
   function initials(name) { return (name || '').split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase(); }
