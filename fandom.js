@@ -998,7 +998,7 @@
       const rank = o.globalRank;
       const total = p.owners.length;
       o.tier = rank <= 10 ? 'gold' : rank <= 50 ? 'teal' : rank <= 200 ? 'silver' : 'grey';
-      o.isWhale = rank <= 10;
+      o.isTop10 = rank <= 10;
       o.pctLabel = topPercentLabel(rank, total);
       // Size is driven by market value held (cube root for visual-area-linear scaling)
       const valueRatio = Math.cbrt((o.valueHeld || 0) / maxValueHeld);
@@ -1313,7 +1313,7 @@
         if (n.type === 'collector') {
           const rankBadge = n.globalRank <= 10 ? `<span style="color:#f5b840; font-weight:800;">#${n.globalRank}</span>` : `<span style="color:#9aa;">#${n.globalRank}</span>`;
           const badges = [];
-          if (n.isWhale) badges.push('<b style="color:#f5b840;">TOP 10 LOCKED</b>');
+          if (n.isTop10) badges.push('<b style="color:#f5b840;">TOP 10 LOCKED</b>');
           if (n.crossPlayerFan) badges.push(`<b style="color:#ff9a4a;">MULTI-PLAYER (${n.crossPlayerCount})</b>`);
           return `<div style="background:rgba(0,0,0,0.92); padding:12px 16px; border-radius:8px; color:#fff; border:1px solid ${esc(n.color)}; font-size:12px; min-width:220px;">${rankBadge} <span style="font-weight:700; font-size:14px;">${esc(n.name)}</span>${badges.length ? '<br/>' + badges.join(' · ') : ''}<br/><span style="color:#9aa; font-size:11px;">${fmtLockedScore(n.lockedScore)} locked score · ${n.fullHoldings.toLocaleString()} moments owned · ${esc(n.pctLabel)}</span></div>`;
         }
@@ -1566,7 +1566,7 @@
         // avatars + names, even silver tier gets a small avatar + name (not just a grey dot).
         const size = Math.sqrt(n.val) * 2.0;
 
-        if (n.isWhale) {
+        if (n.isTop10) {
           // Inner circle collectors: avatar-first — the real profile image IS the node
           const avatarSize = size * 3.8;
           const placeholder = new THREE.Mesh(
@@ -1663,7 +1663,7 @@
         if (l.kind === 'collector-to-player') return l.strokeColor || 'rgba(245,184,64,0.55)';
         if (l.kind === 'player-moment') return 'rgba(255,217,107,0.55)';
         const srcNode = typeof l.source === 'object' ? l.source : null;
-        if (srcNode?.isWhale) return 'rgba(245,184,64,0.62)';
+        if (srcNode?.isTop10) return 'rgba(245,184,64,0.62)';
         if (srcNode?.tier === 'teal') return 'rgba(20,216,196,0.35)';
         if (srcNode?.crossPlayerFan) return 'rgba(255,154,74,0.32)';
         return 'rgba(240,242,253,0.05)';
@@ -1673,7 +1673,7 @@
         if (l.kind === 'collector-to-player') return 1.8;
         if (l.kind === 'player-moment') return 1.8;
         const srcNode = typeof l.source === 'object' ? l.source : null;
-        if (srcNode?.isWhale) return 1.4;
+        if (srcNode?.isTop10) return 1.4;
         if (srcNode?.tier === 'teal') return 0.8;
         return 0.35;
       })
@@ -1681,7 +1681,7 @@
         if (l.kind === 'collector-to-player') return 3;
         if (l.kind === 'player-moment') return 3;
         const srcNode = typeof l.source === 'object' ? l.source : null;
-        if (srcNode?.isWhale) return 2;
+        if (srcNode?.isTop10) return 2;
         return 0;
       })
       .linkDirectionalParticleSpeed(0.008)
@@ -1808,7 +1808,7 @@
     Graph.d3Force('link').distance(l => {
       if (l.kind === 'player-moment') return 120;
       const src = typeof l.source === 'object' ? l.source : null;
-      if (src?.isWhale) return 40;
+      if (src?.isTop10) return 40;
       if (src?.tier === 'teal') return 100;
       return 200;
     });
@@ -1951,7 +1951,7 @@
     };
     animateCount(document.getElementById('gm-moments'), totalMoments, 1500);
     animateCount(document.getElementById('gm-collectors'), currentData.stats.collectors || 0, 1300);
-    animateCount(document.getElementById('gm-whales'), currentData.stats.whales || 0, 1100);
+    animateCount(document.getElementById('gm-top10'), currentData.stats.top10 || 0, 1100);
     animateCount(document.getElementById('gm-serials'), currentData.stats.editions || 0, 900);
     // Locked score total (sum of all locked ASP for this player) — shown as currency.
     const lockedTotal = currentData.stats.lockedTotalScore || 0;
@@ -2504,7 +2504,7 @@
         row.style.cursor = 'pointer';
         const addrSp = mkEl('span', { className: 'addr' });
         addrSp.textContent = `#${h.node.globalRank} · ${h.node.name}`;
-        if (h.node.isWhale) addrSp.appendChild(mkEl('span', { className: 'tier-b', text: 'Inner', style: 'margin-left:6px; background:rgba(245,184,64,0.14); border-color:rgba(245,184,64,0.3); color:#f5b840;' }));
+        if (h.node.isTop10) addrSp.appendChild(mkEl('span', { className: 'tier-b', text: 'Inner', style: 'margin-left:6px; background:rgba(245,184,64,0.14); border-color:rgba(245,184,64,0.3); color:#f5b840;' }));
         if (h.node.crossPlayerFan) addrSp.appendChild(mkEl('span', { className: 'tier-b', text: `${h.node.crossPlayerCount}-player`, style: 'margin-left:6px; background:rgba(255,154,74,0.14); border-color:rgba(255,154,74,0.3); color:#ff9a4a;' }));
         row.appendChild(addrSp);
         row.appendChild(mkEl('span', { className: 'count', text: `${h.count} serial${h.count === 1 ? '' : 's'}` }));
@@ -2974,7 +2974,7 @@
       window.history.replaceState(null, '', window.location.pathname);
     }
     // Also reset graph-meta fields explicitly so any later read sees blanks not stale
-    ['gm-player', 'gm-moments', 'gm-collectors', 'gm-whales', 'gm-serials'].forEach(id => {
+    ['gm-player', 'gm-moments', 'gm-collectors', 'gm-top10', 'gm-serials'].forEach(id => {
       const el = document.getElementById(id); if (el) el.textContent = '—';
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -3081,7 +3081,7 @@
         fullHoldings: h.owner.holdings,
         holdings: h.cnt,
         momentsOwned: [],
-        isWhale: true,
+        isTop10: true,
         tier: 'gold',
         crossPlayerFan: crossCnt > 1,
         crossPlayerCount: crossCnt,
@@ -3114,7 +3114,7 @@
         fullHoldings: h.owner.holdings,
         holdings: h.cnt,
         momentsOwned: [],
-        isWhale: false,
+        isTop10: false,
         tier: 'teal',
         crossPlayerFan: crossCnt > 1,
         crossPlayerCount: crossCnt,
@@ -3148,7 +3148,7 @@
         fullHoldings: h.owner.holdings,
         holdings: h.cnt,
         momentsOwned: [],
-        isWhale: false,
+        isTop10: false,
         tier: 'silver',
         crossPlayerFan: crossCnt > 1,
         crossPlayerCount: crossCnt,
@@ -3224,7 +3224,7 @@
     document.getElementById('gm-moments').textContent = tierLabel(eg.edition.tier);
     document.getElementById('gm-collectors').textContent = eg.stats.uniqueHolders.toString();
     const topLabel = eg.stats.topHolder ? (eg.stats.topHolder.owner.username || shortAddr(eg.stats.topHolder.addr)) : '—';
-    document.getElementById('gm-whales').textContent = topLabel;
+    document.getElementById('gm-top10').textContent = topLabel;
     document.getElementById('gm-serials').textContent = eg.stats.circulation.toLocaleString();
 
     // Subtitle surfaces total unique holders + how many are visible in the ring
@@ -3438,7 +3438,7 @@
     document.getElementById('gm-player').textContent = uname;
     document.getElementById('gm-moments').textContent = cg.totalHoldings.toLocaleString() + ' serials';
     document.getElementById('gm-collectors').textContent = cg.perPlayer.length + ' players';
-    document.getElementById('gm-whales').textContent = pct.rank ? ('Top ' + pct.pctTile + '%') : '—';
+    document.getElementById('gm-top10').textContent = pct.rank ? ('Top ' + pct.pctTile + '%') : '—';
     document.getElementById('gm-serials').textContent = (cg.topMoments || []).length + ' shown · ' + (cg.truncatedMoments || 0) + ' more';
     document.getElementById('graph-hint').textContent = 'Click a player to enter their universe · Esc returns';
 
@@ -3617,9 +3617,9 @@
         const p = data.players.find(x => x.name === payload.player);
         if (p) {
           const topOwner = currentData && currentData.ownerArr && currentData.ownerArr[0];
-          const whaleTag = topOwner ? ` · TOP LOCKED ${String(topOwner.name).toUpperCase()} · ${fmtLockedScore(topOwner.lockedScore)}` : '';
+          const topLockedTag = topOwner ? ` · TOP LOCKED ${String(topOwner.name).toUpperCase()} · ${fmtLockedScore(topOwner.lockedScore)}` : '';
           const totalMarketValue = p.editions.reduce((a, e) => a + editionMarketValue(e), 0);
-          typeLevelSubtitle(`${String(p.name).toUpperCase()} · ${(p.totalMintedMomentCount || 0).toLocaleString()} MOMENTS · ${(p.lockedLeaderboardCount || p.owners.length).toLocaleString()} LOCKED COLLECTORS · ${p.editions.length} EDITIONS${whaleTag}`);
+          typeLevelSubtitle(`${String(p.name).toUpperCase()} · ${(p.totalMintedMomentCount || 0).toLocaleString()} MOMENTS · ${(p.lockedLeaderboardCount || p.owners.length).toLocaleString()} LOCKED COLLECTORS · ${p.editions.length} EDITIONS${topLockedTag}`);
         } else {
           typeLevelSubtitle('');
         }
