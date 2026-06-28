@@ -67,7 +67,7 @@ const DataLayer = {
       console.warn('DataLayer: locked leaderboard fetch failed', e);
       return null;
     }
-  }
+  },
 
   // Load index.json as the single source of player metadata.
   // Called once at startup. The picker renders from this.
