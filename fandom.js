@@ -3670,16 +3670,22 @@
 
   // ======================= Initial URL routing =======================
   const initial = window.fandomRouter.parseQuery(window.location.search);
-  const playerToMark = (initial.level === 'player' || initial.level === 'edition') ? initial.payload.player : null;
   // Only deep-link to a player/edition. With no URL param, stay on the picker.
   if ((initial.level === 'player' || initial.level === 'edition') && initial.payload && initial.payload.player) {
-    loadAndRoutePlayer(initial.payload.player, initial.payload.spotlight || null).then(() => {
-      if (initial.level === 'edition') {
-        window.fandomRouter.go('edition', initial.payload, { replace: true });
-      }
-    });
+    // Ensure index.json is loaded before resolving the player name → playerId
+    if (window.DataLayer && typeof window.DataLayer.initIndex === 'function') {
+      window.DataLayer.initIndex().catch(() => {}).finally(() => {
+        loadAndRoutePlayer(initial.payload.player, initial.payload.spotlight || null).then(() => {
+          if (initial.level === 'edition') {
+            window.fandomRouter.go('edition', initial.payload, { replace: true });
+          }
+        });
+      });
+    } else {
+      // Fallback: try loading directly (works for numeric playerIds)
+      loadAndRoutePlayer(initial.payload.player, initial.payload.spotlight || null);
+    }
   }
-  // else: no auto-route. Picker is visible, graph-area hidden by CSS until first click.
 
   // ===== Mobile overlay toggles =====
   // Legend toggle button is now in fandom.html (inline onclick).
