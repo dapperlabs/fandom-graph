@@ -24,6 +24,10 @@ export default async function handler(req, res) {
       headers: {
         'Content-Type': 'application/json',
         'Connect-Protocol-Version': '1',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json',
+        'Origin': 'https://www.nbatopshot.com',
+        'Referer': 'https://www.nbatopshot.com/',
       },
       body: JSON.stringify({
         leaderboard_id: boardId,
