@@ -1,74 +1,61 @@
 // api/leaderboard.js — Vercel Edge function that proxies the atlas-api
-// locked-score leaderboard. Edge runtime has a different TLS stack than
-// Node serverless, which may bypass Cloudflare's WAF fingerprinting.
+// locked-score leaderboard. Edge runtime has a different TLS stack.
 //
 // GET /api/leaderboard?playerId=2544&limit=1000
-// Returns: { entries: [...], totalCount, hasMore }
+
+export const config = { runtime: 'edge' };
 
 const ATLAS_URL = 'https://api.production.atlas.dapperlabs.com/public/atlas.v1.LeaderboardService/GetLeaderboardPage';
 
-export default async function handler(req, res) {
-  const { playerId, limit, cursor } = req.query;
+export default async function handler(request) {
+  const url = new URL(request.url);
+  const playerId = url.searchParams.get('playerId');
+  const limit = Math.min(parseInt(url.searchParams.get('limit') || '1000', 10), 1000);
 
   if (!playerId) {
-    return res.status(400).json({ error: 'playerId required' });
+    return new Response(JSON.stringify({ error: 'playerId required' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   const boardId = `nba:player:${playerId}`;
-  const pageLimit = Math.min(parseInt(limit, 10) || 1000, 1000);
-  const pageCursor = cursor || '';
 
   try {
-    const response = await fetch(ATLAS_URL, {
+    // Fetch first page
+    const firstRes = await fetch(ATLAS_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Connect-Protocol-Version': '1',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Origin': 'https://www.nbatopshot.com',
-        'Referer': 'https://www.nbatopshot.com/',
       },
-      body: JSON.stringify({
-        leaderboard_id: boardId,
-        cursor: pageCursor,
-        limit: 100, // fetch in pages of 100, accumulate
-      }),
+      body: JSON.stringify({ leaderboard_id: boardId, cursor: '', limit: 100 }),
     });
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error(`Atlas API ${response.status}: ${text.slice(0, 200)}`);
-      return res.status(response.status).json({ error: `Atlas API ${response.status}` });
+    if (!firstRes.ok) {
+      const text = await firstRes.text();
+      return new Response(JSON.stringify({ error: `Atlas API ${firstRes.status}`, detail: text.slice(0, 200) }), {
+        status: firstRes.status,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
     }
 
-    // Collect all pages up to pageLimit
-    let allEntries = [];
-    let totalCount = 0;
-    let hasMore = true;
-    let nextCursor = '';
-    let pageResponse = await response.json();
+    let page = await firstRes.json();
+    let allEntries = page.entries || [];
+    let totalCount = page.totalCount || 0;
+    let hasMore = page.hasMore || false;
+    let nextCursor = page.nextCursor || '';
 
-    totalCount = pageResponse.totalCount || 0;
-    allEntries = pageResponse.entries || [];
-    hasMore = pageResponse.hasMore || false;
-    nextCursor = pageResponse.nextCursor || '';
-
-    // Fetch additional pages
-    while (hasMore && allEntries.length < pageLimit) {
+    // Fetch additional pages up to limit
+    while (hasMore && allEntries.length < limit) {
       const pageRes = await fetch(ATLAS_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Connect-Protocol-Version': '1',
         },
-        body: JSON.stringify({
-          leaderboard_id: boardId,
-          cursor: nextCursor,
-          limit: 100,
-        }),
+        body: JSON.stringify({ leaderboard_id: boardId, cursor: nextCursor, limit: 100 }),
       });
-
       if (!pageRes.ok) break;
       const pageData = await pageRes.json();
       allEntries = allEntries.concat(pageData.entries || []);
@@ -76,10 +63,8 @@ export default async function handler(req, res) {
       nextCursor = pageData.nextCursor || '';
     }
 
-    // Trim to requested limit
-    allEntries = allEntries.slice(0, pageLimit);
+    allEntries = allEntries.slice(0, limit);
 
-    // Transform to our format
     const entries = allEntries.map(e => ({
       rank: e.rank,
       lockedScore: e.score,
@@ -90,19 +75,23 @@ export default async function handler(req, res) {
       dapperId: e.user?.dapperId || null,
     }));
 
-    // Cache for 5 minutes at the edge, 1 minute in the browser
-    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
-    return res.status(200).json({
+    return new Response(JSON.stringify({
       playerId,
       entries,
       totalCount,
       hasMore: allEntries.length < totalCount,
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=60, s-maxage=300, stale-while-revalidate=600',
+      },
     });
   } catch (err) {
-    console.error('Leaderboard proxy error:', err);
-    return res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    return new Response(JSON.stringify({ error: 'Failed to fetch leaderboard', detail: err.message }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    });
   }
 }
-export const config = { runtime: 'edge' };
