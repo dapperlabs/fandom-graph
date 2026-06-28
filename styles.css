@@ -442,9 +442,10 @@ details[open] .sig-expand::after { content: ''; }
 .lb-row {
   display: grid;
   grid-template-columns: 28px 36px 1fr auto;
-  gap: 10px;
+  grid-template-rows: auto 3px;
+  gap: 8px 10px;
   align-items: center;
-  padding: 9px 10px;
+  padding: 10px 10px;
   border-radius: 8px;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -460,6 +461,7 @@ details[open] .sig-expand::after { content: ''; }
   font-size: 18px;
   color: var(--fg-muted);
   text-align: center;
+  grid-row: 1;
 }
 .lb-row:nth-child(1) .lb-rank { color: var(--accent-gold); font-size: 20px; }
 .lb-row:nth-child(2) .lb-rank { color: #d4d4d9; }
@@ -480,11 +482,12 @@ details[open] .sig-expand::after { content: ''; }
   font-weight: 800;
   font-size: 12px;
   color: #fff;
+  grid-row: 1;
 }
 .lb-row:nth-child(1) .lb-avatar { border-color: var(--accent-gold); box-shadow: 0 0 12px rgba(245,184,64,0.5); }
 .lb-row:nth-child(2) .lb-avatar { border-color: #d4d4d9; }
 .lb-row:nth-child(3) .lb-avatar { border-color: #c58a53; }
-.lb-info { overflow: hidden; }
+.lb-info { overflow: hidden; grid-row: 1; }
 .lb-name {
   font-size: 13px;
   font-weight: 600;
@@ -502,14 +505,16 @@ details[open] .sig-expand::after { content: ''; }
 .lb-holdings {
   font-family: var(--hdr);
   font-weight: 800;
-  font-size: 16px;
+  font-size: 15px;
   color: var(--accent-teal);
   text-align: right;
+  white-space: nowrap;
+  grid-row: 1;
 }
 .lb-row:nth-child(1) .lb-holdings { color: var(--accent-gold); }
 .lb-bar {
-  grid-column: 3 / 5;
-  grid-row: 3;
+  grid-column: 1 / 5;
+  grid-row: 2;
   height: 3px;
   background: rgba(255,255,255,0.06);
   border-radius: 2px;
@@ -521,23 +526,9 @@ details[open] .sig-expand::after { content: ''; }
   background: linear-gradient(90deg, var(--accent-gold), var(--accent-teal));
   border-radius: 2px;
 }
-/* T1.10 — Leaderboard sparkline. Per-edition fingerprint for each collector. */
 .lb-spark-wrap {
-  grid-column: 3 / 5;
-  grid-row: 2;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  margin-top: 3px;
+  display: none; /* hidden — sparkline was for per-edition holdings, less relevant with locked scores */
 }
-.lb-spark {
-  display: block;
-  overflow: visible;
-  filter: drop-shadow(0 0 2px rgba(0,0,0,0.45));
-}
-.lb-spark rect { transition: opacity 0.15s ease; }
-.lb-spark:hover rect { opacity: 0.9; }
-.lb-spark-empty rect { opacity: 0.35; }
 
 /* Spotlight overlay — pride reveal */
 .spotlight-overlay {
