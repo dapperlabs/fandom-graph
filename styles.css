@@ -526,9 +526,6 @@ details[open] .sig-expand::after { content: ''; }
   background: linear-gradient(90deg, var(--accent-gold), var(--accent-teal));
   border-radius: 2px;
 }
-.lb-spark-wrap {
-  display: none; /* hidden — sparkline was for per-edition holdings, less relevant with locked scores */
-}
 
 /* Spotlight overlay — pride reveal */
 .spotlight-overlay {

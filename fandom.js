@@ -115,13 +115,11 @@
   }
   function fmtLockedScore(score) {
     if (!score || score <= 0) return '0';
-    // The atlas API returns score in cents (ScoreScale = 100).
-    // displayScore = score / 100. The Top Shot app shows displayScore
-    // as a plain number (no currency symbol). We do the same.
-    const v = score / 100;
-    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
-    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
-    return Math.round(v).toLocaleString();
+    // Top Shot Score is in points (not cents, not currency).
+    // The atlas API returns the raw points value. Display as-is with K/M suffixes.
+    if (score >= 1e6) return (score / 1e6).toFixed(2) + 'M';
+    if (score >= 1e3) return (score / 1e3).toFixed(1) + 'K';
+    return Math.round(score).toLocaleString();
   }
   function shortAddr(a) { if (!a) return '—'; return a.length > 10 ? a.slice(0, 6) + '…' + a.slice(-4) : a; }
   function initials(name) { return (name || '').split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase(); }
@@ -1506,6 +1504,8 @@
             borderColor: n.teamColors[0], color: '#fff', scale: 3.2
           });
           nameSprite.position.set(0, -n.val * 1.35, 0);
+          // Always render on top — prevents occlusion during auto-rotate
+          if (nameSprite.material) { nameSprite.material.depthTest = false; nameSprite.material.zOffset = -1; }
           group.add(nameSprite);
           // Team subtitle
           const teamSprite = makeTextSprite(n.team.toUpperCase(), {
@@ -1513,6 +1513,7 @@
             borderColor: 'rgba(255,255,255,0.15)', color: '#cfcfd6', scale: 6
           });
           teamSprite.position.set(0, -n.val * 1.8, 0);
+          if (teamSprite.material) { teamSprite.material.depthTest = false; teamSprite.material.zOffset = -1; }
           group.add(teamSprite);
           n.__group = group;
           return group;
@@ -2163,13 +2164,7 @@
       row.appendChild(infoEl);
       row.appendChild(holdEl);
 
-      // Per-edition fingerprint sparkline for this collector's holdings shape
-      const sparkWrap = document.createElement('div');
-      sparkWrap.className = 'lb-spark-wrap';
-      const distribution = editionHoldingsForOwner(o.id, p);
-      sparkWrap.innerHTML = renderSparklineSVG(distribution);
-      row.appendChild(sparkWrap);
-
+      // Progress bar (full width, row 2 of the grid)
       const bar = document.createElement('div');
       bar.className = 'lb-bar';
       const fill = document.createElement('div');
