@@ -3611,15 +3611,18 @@
   window.fandomRouter.register('player', {
     render: (payload) => {
       showGraphFor(payload.player);
-      // L2 context subtitle — upgraded to mention top whale for per-player identity
-      const p = data.players.find(x => x.name === payload.player);
-      if (p) {
-        const topOwner = currentData && currentData.ownerArr && currentData.ownerArr[0];
-        const whaleTag = topOwner ? ` · TOP WHALE ${String(topOwner.name).toUpperCase()} HOLDS ${topOwner.fullHoldings.toLocaleString()}` : '';
-        const totalMarketValue = p.editions.reduce((a, e) => a + editionMarketValue(e), 0);
-        typeLevelSubtitle(`${String(p.name).toUpperCase()} · ${(p.totalMintedMomentCount || 0).toLocaleString()} MOMENTS · ${p.owners.length.toLocaleString()} COLLECTORS · ${p.editions.length} EDITIONS · EST ${fmtUSDShort(totalMarketValue)} MARKET VALUE${whaleTag}`);
-      } else {
-        typeLevelSubtitle('');
+      // Subtitle is optional — typeLevelSubtitle was removed in the L0/L1 cleanup.
+      // Guard so the render function doesn't crash (which would prevent spotlight activation).
+      if (typeof typeLevelSubtitle === 'function') {
+        const p = data.players.find(x => x.name === payload.player);
+        if (p) {
+          const topOwner = currentData && currentData.ownerArr && currentData.ownerArr[0];
+          const whaleTag = topOwner ? ` · TOP LOCKED ${String(topOwner.name).toUpperCase()} · ${fmtLockedScore(topOwner.lockedScore)}` : '';
+          const totalMarketValue = p.editions.reduce((a, e) => a + editionMarketValue(e), 0);
+          typeLevelSubtitle(`${String(p.name).toUpperCase()} · ${(p.totalMintedMomentCount || 0).toLocaleString()} MOMENTS · ${(p.lockedLeaderboardCount || p.owners.length).toLocaleString()} LOCKED COLLECTORS · ${p.editions.length} EDITIONS${whaleTag}`);
+        } else {
+          typeLevelSubtitle('');
+        }
       }
       if (payload.spotlight) setTimeout(() => activateSpotlight(payload.spotlight), 1500);
     },
