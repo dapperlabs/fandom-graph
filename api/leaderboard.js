@@ -1,6 +1,6 @@
-// api/leaderboard.js — Vercel serverless function that proxies the atlas-api
-// locked-score leaderboard. Server-side calls bypass Cloudflare's browser
-// challenge, and Vercel's IPs are not blocked.
+// api/leaderboard.js — Vercel Edge function that proxies the atlas-api
+// locked-score leaderboard. Edge runtime has a different TLS stack than
+// Node serverless, which may bypass Cloudflare's WAF fingerprinting.
 //
 // GET /api/leaderboard?playerId=2544&limit=1000
 // Returns: { entries: [...], totalCount, hasMore }
@@ -105,3 +105,4 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Failed to fetch leaderboard' });
   }
 }
+export const config = { runtime: 'edge' };
