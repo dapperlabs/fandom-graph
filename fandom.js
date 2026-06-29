@@ -2823,12 +2823,15 @@
   let _idleSpinT = 0;
   function _idleSpin() {
     if (!_idleSpinning || !Graph) return;
-    _idleSpinT += 0.0008;  // slow drift
+    _idleSpinT += 0.0005;  // very slow ambient drift — ~120s per rotation
     const dist = 1250;
+    // Orbit around center with fixed altitude — no vertical bobbing
     Graph.cameraPosition(
-      { x: dist * Math.sin(_idleSpinT), y: 230 + 60 * Math.sin(_idleSpinT * 0.5), z: dist * Math.cos(_idleSpinT) },
-      undefined, 0
+      { x: dist * Math.sin(_idleSpinT), y: 340, z: dist * Math.cos(_idleSpinT) },
+      { x: 0, y: 0, z: 0 }, 0
     );
+    const ctrls = (typeof Graph.controls === 'function') ? Graph.controls() : null;
+    if (ctrls && ctrls.target) { ctrls.target.set(0, 0, 0); }
     requestAnimationFrame(_idleSpin);
   }
   function scheduleIdleAutoRotate() {
@@ -2990,11 +2993,20 @@
   });
 
   let spinT = 0;
+  let spinTargetY = 340; // fixed y — no bobbing
   function spin() {
     if (!autoRotate || !Graph) return;
-    spinT += 0.003;
+    spinT += 0.0015; // ~half the previous speed — ~70s per full rotation
     const dist = 1250;
-    Graph.cameraPosition({ x: dist * Math.sin(spinT), y: 230, z: dist * Math.cos(spinT) });
+    // Orbit around the player center (0,0,0). Always look at center.
+    Graph.cameraPosition({
+      x: dist * Math.sin(spinT),
+      y: spinTargetY,
+      z: dist * Math.cos(spinT)
+    }, { x: 0, y: 0, z: 0 }, 0);
+    // Keep OrbitControls target at center so manual interaction after spin stays centered
+    const ctrls = (typeof Graph.controls === 'function') ? Graph.controls() : null;
+    if (ctrls && ctrls.target) { ctrls.target.set(0, 0, 0); }
     requestAnimationFrame(spin);
   }
 
