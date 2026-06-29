@@ -499,14 +499,15 @@
     const token = ++_pendingLoadToken;
     showPlayerLoading(playerName);
     try {
+      loadingSub.textContent = 'fetching moments…';
       const payload = await window.DataLayer.loadPlayer(meta.playerId);
       if (token !== _pendingLoadToken) return; // superseded by a later click
+      loadingSub.textContent = `loaded ${payload.owners?.length?.toLocaleString() || ''} collectors`;
       // Strip pack/minter/system wallets at the boundary so nothing downstream sees them.
       const SYSTEM_ADDRS = new Set(['b6f2481eba4df97b', '0xb6f2481eba4df97b']);
       const isSystem = (o) => {
         if (!o || !o.flowAddress) return false;
         if (SYSTEM_ADDRS.has(String(o.flowAddress).toLowerCase())) return true;
-        // Heuristic: anonymous wallet with absurd holdings = pack distributor
         const noUsername = !o.username || o.username === '?' || o.username === '';
         return noUsername && (o.holdings || 0) > 1500;
       };
@@ -516,8 +517,6 @@
         const removed = before - payload.owners.length;
         if (removed) console.log(`[fandom] filtered ${removed} system account(s) from ${payload.name}`);
       }
-      // Also strip system addresses from per-edition serial samples so they don't appear
-      // as bonds in the graph or in spotlight ownership math.
       if (Array.isArray(payload.editions)) {
         for (const ed of payload.editions) {
           if (Array.isArray(ed.serialsSampled)) {
@@ -527,8 +526,7 @@
       }
       data.players = [payload];
       // Fetch locked-score leaderboard from atlas API (via Edge proxy).
-      // Re-ranks owners by locked ASP (sum of locked moments' ASP) instead of
-      // raw ownership count. Falls back to ownership-based ranking on failure.
+      loadingSub.textContent = 'fetching locked scores…';
       try {
         const lockedData = await window.DataLayer.loadLockedLeaderboard(meta.playerId);
         if (lockedData && lockedData.entries) {
@@ -541,14 +539,11 @@
             o.lockedScore = locked ? locked.lockedScore : 0;
             o.lockedRank = locked ? locked.lockedRank : null;
           }
-          // Re-sort by lockedScore DESC, fall back to holdings for ties/zeroes
           payload.owners.sort((a, b) => (b.lockedScore || 0) - (a.lockedScore || 0) || b.holdings - a.holdings);
-          // Update globalRank to locked-score rank
           payload.owners.forEach((o, i) => { o.globalRank = i + 1; });
           payload.lockedLeaderboardCount = lockedData.totalCount;
           payload.lockedTotalScore = lockedData.entries.reduce((s, e) => s + (e.lockedScore || 0), 0);
         } else {
-          // Fallback: ownership-based ranking (existing behavior)
           payload.lockedLeaderboardCount = payload.owners.length;
           payload.lockedTotalScore = 0;
         }
@@ -557,6 +552,7 @@
         payload.lockedLeaderboardCount = payload.owners.length;
         payload.lockedTotalScore = 0;
       }
+      loadingSub.textContent = 'building graph…';
       rebuildOwnerIndexes();
       hidePlayerLoading();
       document.body.classList.add('viewing-player');
