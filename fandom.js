@@ -425,13 +425,55 @@
   const loadingSub = document.getElementById('player-loading-sub');
   const loadingRetry = document.getElementById('player-loading-retry');
 
+  let _loadingMsgTimer = null;
+  let _loadingMsgIdx = 0;
+  const LOADING_MESSAGES = [
+    "Loading {name}'s universe…",
+    'Warping through the Flow Network…',
+    'Asking the blockchain nicely…',
+    'Untangling {editions} editions…',
+    'Finding the real fans (not the exchange wallets)…',
+    'Calculating locked scores…',
+    'Did you know {name} has {moments} Moments?',
+    'Rendering collector nodes in 3D space…',
+    'Almost there… the graph is forming…',
+    'Connecting the dots (literally)…'
+  ];
+  function _setLoadingProgress(pct) {
+    const fill = document.getElementById('loading-progress-fill');
+    if (fill) fill.style.width = pct + '%';
+  }
   function showPlayerLoading(name) {
     if (!loadingEl) return;
     loadingEl.classList.remove('error');
     loadingEl.style.display = 'flex';
     loadingRetry.style.display = 'none';
+    // Player initials glow in the background
+    const initialsEl = document.getElementById('loading-initials');
+    if (initialsEl && name) {
+      initialsEl.textContent = name.split(' ').map(p => p[0] || '').slice(0, 2).join('').toUpperCase();
+    }
+    // Start message rotation with crossfade every 1.8s
+    _loadingMsgIdx = 0;
     loadingMsg.textContent = `Loading ${name}'s universe…`;
     loadingSub.textContent = '';
+    if (_loadingMsgTimer) { clearInterval(_loadingMsgTimer); _loadingMsgTimer = null; }
+    _loadingMsgTimer = setInterval(() => {
+      _loadingMsgIdx++;
+      const template = LOADING_MESSAGES[_loadingMsgIdx % LOADING_MESSAGES.length];
+      const msg = template
+        .replace('{name}', name || 'player')
+        .replace('{editions}', '92')
+        .replace('{moments}', '300K+')
+        .replace('{collectors}', '9,000+');
+      loadingMsg.textContent = msg;
+      // Re-trigger crossfade animation
+      loadingMsg.style.animation = 'none';
+      void loadingMsg.offsetHeight;
+      loadingMsg.style.animation = 'msg-crossfade 0.5s ease';
+    }, 1800);
+    // Initialize progress bar
+    _setLoadingProgress(5);
     const empty = document.getElementById('graph-empty');
     if (empty) empty.style.display = 'none';
   }
@@ -444,11 +486,17 @@
     }
   }
   function hidePlayerLoading() {
-    if (loadingEl) loadingEl.style.display = 'none';
+    if (loadingEl) {
+      _setLoadingProgress(100);
+      if (_loadingMsgTimer) { clearInterval(_loadingMsgTimer); _loadingMsgTimer = null; }
+      // Brief pause so the completed bar is visible before fade-out
+      setTimeout(() => { loadingEl.style.display = 'none'; }, 300);
+    }
   }
   function showPlayerError(name, err, onRetry) {
     if (!loadingEl) return;
     loadingEl.classList.add('error');
+    if (_loadingMsgTimer) { clearInterval(_loadingMsgTimer); _loadingMsgTimer = null; }
     loadingEl.style.display = 'flex';
     const rate = err && err.name === 'RateLimitError';
     const notFound = err && err.name === 'NotFoundError';
@@ -505,9 +553,11 @@
     document.querySelector('.player-picker').style.display = 'none';
     try {
       loadingSub.textContent = 'fetching moments…';
+      _setLoadingProgress(15);
       const payload = await window.DataLayer.loadPlayer(meta.playerId);
       if (token !== _pendingLoadToken) return; // superseded by a later click
       loadingSub.textContent = `loaded ${payload.owners?.length?.toLocaleString() || ''} collectors`;
+      _setLoadingProgress(40);
       // Strip pack/minter/system wallets at the boundary so nothing downstream sees them.
       const SYSTEM_ADDRS = new Set(['b6f2481eba4df97b', '0xb6f2481eba4df97b']);
       const isSystem = (o) => {
@@ -530,8 +580,8 @@
         }
       }
       data.players = [payload];
-      // Fetch locked-score leaderboard from atlas API (via Edge proxy).
       loadingSub.textContent = 'fetching locked scores…';
+      _setLoadingProgress(60);
       try {
         const lockedData = await window.DataLayer.loadLockedLeaderboard(meta.playerId);
         if (lockedData && lockedData.entries) {
@@ -558,6 +608,7 @@
         payload.lockedTotalScore = 0;
       }
       loadingSub.textContent = 'building graph…';
+      _setLoadingProgress(90);
       rebuildOwnerIndexes();
       hidePlayerLoading();
       // body.viewing-player already set at the start of loadAndRoutePlayer
