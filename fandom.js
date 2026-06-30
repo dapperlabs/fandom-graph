@@ -1144,7 +1144,7 @@
     // These drive the "Showing top S of M collectors" affordance and the
     // window.__fandomCoverage hook for the smoke test.
     const coverageS = ownerArr.length;
-    const coverageM = p.lockedLeaderboardCount || p.owners.length;
+    const coverageM = 200; // standardized: always show top 200 collectors
     const lockedTotalScore = p.lockedTotalScore || 0;
 
     return {
@@ -2092,10 +2092,8 @@
       coverageEl.style.display = 'block';
       if (cov.M === 0) {
         coverageEl.textContent = 'No collector data available';
-      } else if (cov.M <= cov.S) {
-        coverageEl.textContent = 'Showing all ' + cov.M.toLocaleString() + (cov.locked ? ' locked collectors' : ' collectors');
       } else {
-        coverageEl.textContent = 'Showing top ' + cov.S + ' of ' + cov.M.toLocaleString() + (cov.locked ? ' locked collectors' : ' collectors');
+        coverageEl.textContent = 'Showing top ' + Math.min(cov.S, 200) + ' collectors by locked score';
       }
     }
     window.__fandomCoverage = { S: cov.S, M: cov.M };
@@ -2174,8 +2172,8 @@
     const sub = document.getElementById('lb-sub');
     lb.innerHTML = '';
     const p = graphData.player;
-    const lockedTotal = p.lockedLeaderboardCount || p.owners.length;
-    sub.textContent = `${lockedTotal.toLocaleString()} locked collectors of ${p.name}. Ranked by locked score.`;
+    const lockedTotal = 200;
+    sub.textContent = `Top 200 collectors of ${p.name}. Ranked by locked score.`;
     const max = Math.max(1, ...graphData.ownerArr.slice(0, 10).map(o => o.lockedScore || 0));
     for (let i = 0; i < Math.min(10, graphData.ownerArr.length); i++) {
       const o = graphData.ownerArr[i];
