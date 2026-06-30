@@ -498,6 +498,11 @@
     const playerName = meta.name;
     const token = ++_pendingLoadToken;
     showPlayerLoading(playerName);
+    // Show the graph-area immediately so the loading overlay is visible.
+    // Previously this was set after data loaded — meaning the loading spinner
+    // was inside a display:none container and the user saw nothing.
+    document.body.classList.add('viewing-player');
+    document.querySelector('.player-picker').style.display = 'none';
     try {
       loadingSub.textContent = 'fetching moments…';
       const payload = await window.DataLayer.loadPlayer(meta.playerId);
@@ -555,7 +560,7 @@
       loadingSub.textContent = 'building graph…';
       rebuildOwnerIndexes();
       hidePlayerLoading();
-      document.body.classList.add('viewing-player');
+      // body.viewing-player already set at the start of loadAndRoutePlayer
       // New player — clear stale spotlight + drawer state from the previous player.
       if (window.__clearCollectorSpotlight) window.__clearCollectorSpotlight();
       const _drawer = document.getElementById('drawer');
@@ -2817,40 +2822,31 @@
   }
 
   // ======================= Idle auto-rotate (ambient cinema) =======================
-  // After N seconds of no user input, slowly auto-orbit the camera. Any input cancels.
+  // After 8s of no user input, slowly auto-orbit via OrbitControls. Any input cancels.
   let _idleTimer = null;
-  let _idleSpinning = false;
-  let _idleSpinT = 0;
-  function _idleSpin() {
-    if (!_idleSpinning || !Graph) return;
-    _idleSpinT += 0.0005;  // very slow ambient drift — ~120s per rotation
-    const dist = 1250;
-    // Orbit around center with fixed altitude — no vertical bobbing
-    Graph.cameraPosition(
-      { x: dist * Math.sin(_idleSpinT), y: 340, z: dist * Math.cos(_idleSpinT) },
-      { x: 0, y: 0, z: 0 }, 0
-    );
-    const ctrls = (typeof Graph.controls === 'function') ? Graph.controls() : null;
-    if (ctrls && ctrls.target) { ctrls.target.set(0, 0, 0); }
-    requestAnimationFrame(_idleSpin);
-  }
   function scheduleIdleAutoRotate() {
     cancelIdleAutoRotate();
     _idleTimer = setTimeout(() => {
       if (!document.body.classList.contains('viewing-player')) return;
-      _idleSpinning = true;
-      _idleSpinT = 0;
-      _idleSpin();
+      if (typeof Graph.controls !== 'function') return;
+      const c = Graph.controls();
+      if (!c) return;
+      c.autoRotate = true;
+      c.autoRotateSpeed = 0.3; // very slow ambient drift
+      c.target.set(0, 0, 0);
     }, 8000);
   }
   function cancelIdleAutoRotate() {
     if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
-    _idleSpinning = false;
+    if (typeof Graph.controls === 'function') {
+      const c = Graph.controls();
+      if (c) c.autoRotate = false;
+    }
   }
   // Any pointer/key input cancels idle spin and re-arms the timer
   ['pointerdown', 'wheel', 'keydown', 'touchstart'].forEach(evt => {
     window.addEventListener(evt, () => {
-      if (_idleSpinning) cancelIdleAutoRotate();
+      cancelIdleAutoRotate();
       if (document.body.classList.contains('viewing-player')) scheduleIdleAutoRotate();
     }, { passive: true });
   });
@@ -2944,71 +2940,16 @@
   document.getElementById('btn-spin').addEventListener('click', e => {
     autoRotate = !autoRotate;
     e.target.textContent = autoRotate ? '⏸ Stop rotation' : '◐ Auto-rotate';
-    spin();
+    // Use OrbitControls' built-in autoRotate — it gracefully yields to manual
+    // input (drag/wheel/touch) without fighting the user. The old manual spin()
+    // called cameraPosition every frame which locked out interaction.
+    if (typeof Graph.controls !== 'function') return;
+    const c = Graph.controls();
+    if (!c) return;
+    c.autoRotate = autoRotate;
+    c.autoRotateSpeed = 0.5; // slow, gentle orbit
+    c.target.set(0, 0, 0); // orbit around the player center
   });
-  function goBackToPicker() {
-    if (window.__clearCollectorSpotlight) window.__clearCollectorSpotlight();
-    if (Graph) Graph.graphData({ nodes: [], links: [] });
-    // Remove the hint annulus so it doesn't linger over the empty scene.
-    if (hintAnnulusMesh) {
-      const scene = Graph && Graph.scene();
-      if (scene) scene.remove(hintAnnulusMesh);
-      hintAnnulusMesh = null;
-    }
-    // Hide the coverage disclosure affordance.
-    const coverageEl = document.getElementById('graph-coverage');
-    if (coverageEl) { coverageEl.style.display = 'none'; coverageEl.textContent = ''; }
-    window.__fandomCoverage = null;
-    ['graph-legend', 'graph-meta', 'graph-controls', 'graph-hint', 'leaderboard', 'spotlight-overlay', 'spotlight-stat'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.style.display = 'none';
-    });
-    const empty = document.getElementById('graph-empty'); if (empty) empty.style.display = 'flex';
-    document.querySelectorAll('.player-card.active').forEach(el => el.classList.remove('active'));
-    if (drawer) drawer.classList.remove('open');
-    document.body.classList.remove('viewing-player');
-    // Just clear the URL state directly — don't route to a home view.
-    if (window.history && window.history.replaceState) {
-      window.history.replaceState(null, '', window.location.pathname);
-    }
-    // Also reset graph-meta fields explicitly so any later read sees blanks not stale
-    ['gm-player', 'gm-moments', 'gm-collectors', 'gm-top10', 'gm-serials'].forEach(id => {
-      const el = document.getElementById(id); if (el) el.textContent = '—';
-    });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-  document.getElementById('btn-close').addEventListener('click', goBackToPicker);
-  const backBtn = document.getElementById('back-to-picker');
-  if (backBtn) backBtn.addEventListener('click', goBackToPicker);
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'Escape') return;
-    if (document.activeElement && ['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
-    // Layered ESC: drawer first → spotlight → back to picker
-    if (drawer && drawer.classList.contains('open')) { drawer.classList.remove('open'); return; }
-    const spotEl = document.getElementById('spotlight-stat');
-    if (spotEl && spotEl.style.display !== 'none' && window.__clearCollectorSpotlight) {
-      window.__clearCollectorSpotlight();
-      return;
-    }
-    if (document.body.classList.contains('viewing-player')) goBackToPicker();
-  });
-
-  let spinT = 0;
-  let spinTargetY = 340; // fixed y — no bobbing
-  function spin() {
-    if (!autoRotate || !Graph) return;
-    spinT += 0.0015; // ~half the previous speed — ~70s per full rotation
-    const dist = 1250;
-    // Orbit around the player center (0,0,0). Always look at center.
-    Graph.cameraPosition({
-      x: dist * Math.sin(spinT),
-      y: spinTargetY,
-      z: dist * Math.cos(spinT)
-    }, { x: 0, y: 0, z: 0 }, 0);
-    // Keep OrbitControls target at center so manual interaction after spin stays centered
-    const ctrls = (typeof Graph.controls === 'function') ? Graph.controls() : null;
-    if (ctrls && ctrls.target) { ctrls.target.set(0, 0, 0); }
-    requestAnimationFrame(spin);
-  }
 
   window.addEventListener('resize', () => {
     if (Graph) Graph.width(container.clientWidth).height(container.clientHeight);
